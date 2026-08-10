@@ -27,7 +27,11 @@ type Result struct {
 	Name       string
 	Severity   string
 	Vulnerable bool
-	Evidence   string
+	// Inconclusive is true when the probe could not reach a verdict (e.g. the
+	// judge model errored or replied unparseably). It is never set together
+	// with Vulnerable; an inconclusive probe is not treated as a finding.
+	Inconclusive bool
+	Evidence     string
 }
 
 // Probe is a single OWASP-LLM-Top-10 attack technique that can be run

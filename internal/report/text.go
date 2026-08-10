@@ -22,17 +22,22 @@ func WriteText(w io.Writer, results []probe.Result) {
 	fmt.Fprintln(w, "----------------------------------------------------------------------------------------")
 
 	vulnCount := 0
+	inconclusiveCount := 0
 	for _, r := range results {
 		status := "ok"
-		if r.Vulnerable {
+		switch {
+		case r.Vulnerable:
 			status = "VULNERABLE"
 			vulnCount++
+		case r.Inconclusive:
+			status = "INCONCLUSIVE"
+			inconclusiveCount++
 		}
 		fmt.Fprintf(w, "%-24s %-8s %-28s %-10s %s\n", r.ProbeID, r.OWASP, r.Name, r.Severity, status)
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "%d probe(s) run, %d finding(s)\n", len(results), vulnCount)
+	fmt.Fprintf(w, "%d probe(s) run, %d finding(s), %d inconclusive\n", len(results), vulnCount, inconclusiveCount)
 }
 
 // GateFailed reports whether any result at or above the failOn severity
