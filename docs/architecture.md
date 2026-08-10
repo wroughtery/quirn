@@ -1,6 +1,6 @@
-# Cerberus — Architecture & Roadmap
+# Quirn — Architecture & Roadmap
 
-Working notes. Decisions here are the current plan, not final. Name is a placeholder pending selection (Jailscope leading).
+Working notes. Decisions here are the current plan, not final. Name locked: **Quirn** (repo: `wroughtery/quirn`).
 
 ## Positioning & wedge
 

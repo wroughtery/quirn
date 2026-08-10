@@ -1,4 +1,4 @@
-# Cerberus  *(placeholder name — pick from the shortlist; Jailscope leading)*
+# Quirn
 
 **"gitleaks / trivy for LLM apps."** An open-source security linter for AI features: one line in CI runs an OWASP-LLM-Top-10 red-team against your chatbot or LLM endpoint and posts findings to the GitHub Security tab + the PR — zero config, zero Python, BYO-key. Grows from there into source-code and live-app security.
 
@@ -45,4 +45,4 @@ Test only LLM endpoints and targets you **own or are authorized to test**. For t
 
 ## Status
 
-Pre-v0. Direction locked: **LLM red-team wedge, Go single-binary core, open-core, BYO-key, Wroughtery sub-brand.** Name selection + `wroughtery` org next, then scaffold.
+Pre-v0. Locked: **name Quirn, LLM red-team wedge, Go single-binary core, open-core, BYO-key, Wroughtery sub-brand.** Repo lives at `wroughtery/quirn`. Go CLI scaffold in progress.
