@@ -5,7 +5,11 @@
 *.pem
 *.key
 
-# --- Go (engine/) ---
+# --- Go (root module + engine/) ---
+/quirn
+/quirn.exe
+*.test
+coverage.out
 /engine/bin/
 /engine/*.exe
 /engine/*.test
