@@ -1,0 +1,68 @@
+name: 'Quirn LLM Red Team Scan'
+description: 'Red-team an OpenAI-compatible LLM endpoint against the OWASP LLM Top 10 and report findings as SARIF, JSON, or text.'
+author: 'Wroughtery'
+
+inputs:
+  target:
+    description: 'Base URL of the OpenAI-compatible endpoint under test.'
+    required: true
+  model:
+    description: 'Model name to send probe payloads to.'
+    required: false
+    default: 'gpt-4o-mini'
+  judge-model:
+    description: 'Model name used to judge probe outcomes. Defaults to the value of `model` when left empty.'
+    required: false
+    default: ''
+  fail-on:
+    description: 'Minimum severity that fails the build: low|medium|high|critical.'
+    required: false
+    default: 'high'
+  format:
+    description: 'Report format: sarif|json|text.'
+    required: false
+    default: 'sarif'
+  output:
+    description: 'Path (relative to the workspace) to write the report to.'
+    required: false
+    default: 'quirn.sarif'
+  api-key:
+    description: 'API key for the target endpoint. Passed to the binary as the QUIRN_API_KEY environment variable — pass this from a repository/organization secret, never a literal key.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    # No releases exist yet, so every consumer builds the binary from the
+    # source checked out alongside this action.yml (github.action_path)
+    # rather than downloading a prebuilt artifact.
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+
+    - name: Build quirn
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: go build -o quirn .
+
+    - name: Run quirn scan
+      shell: bash
+      env:
+        QUIRN_API_KEY: ${{ inputs.api-key }}
+      # Composite `run` steps execute as `bash -e`, so a non-zero exit from
+      # the binary (the --fail-on gate tripping, or a scan error) already
+      # fails this step and the job — nothing extra to propagate.
+      run: |
+        "${{ github.action_path }}/quirn" scan \
+          --target "${{ inputs.target }}" \
+          --model "${{ inputs.model }}" \
+          --judge-model "${{ inputs.judge-model }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          --format "${{ inputs.format }}" \
+          --out "${{ inputs.output }}"
+
+branding:
+  icon: 'shield'
+  color: 'red'

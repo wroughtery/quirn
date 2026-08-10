@@ -1,0 +1,46 @@
+# EXAMPLE consumer workflow — this is documentation, not part of quirn's own
+# CI. Copy it into a repo that hosts an LLM endpoint you want scanned, point
+# `target` at that endpoint, and adjust the `uses:` line once quirn has a
+# tagged release (e.g. `uses: wroughtery/quirn@v1`).
+#
+# It runs the scan on every pull request, always publishes findings to the
+# Security tab (even when the severity gate trips the build), then fails the
+# job if the gate tripped so the PR shows red.
+name: Quirn LLM red-team scan (example)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  quirn-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run quirn scan
+        id: quirn
+        uses: ./
+        continue-on-error: true
+        with:
+          # Store the endpoint URL as a secret if it's not meant to be
+          # public; use `vars.QUIRN_TARGET_URL` instead of `secrets.` if it
+          # is fine to expose (e.g. a public staging URL).
+          target: ${{ secrets.QUIRN_TARGET_URL }}
+          api-key: ${{ secrets.QUIRN_API_KEY }}
+          fail-on: high
+          format: sarif
+          output: quirn.sarif
+
+      - name: Upload SARIF to the Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: quirn.sarif
+
+      - name: Fail the job if the severity gate tripped
+        if: steps.quirn.outcome == 'failure'
+        run: exit 1

@@ -15,6 +15,34 @@ Every existing tool is either a **Python/Node package** (garak, promptfoo, PyRIT
 - **Baseline / ratchet.** A `.baseline` file so PRs surface only *new* vulnerabilities — adopt at `--fail-on critical`, tighten over time. Stops teams disabling the gate.
 - **Probe classes:** prompt injection, jailbreak, system-prompt leakage, sensitive-data disclosure, insecure output handling, and **agent tool-abuse / excessive agency** (the fastest-growing risk, weakly covered by incumbents).
 
+## Usage
+
+Build and run locally:
+
+```sh
+go build -o quirn .
+export QUIRN_API_KEY=sk-...
+./quirn scan --target https://api.openai.com --model gpt-4o-mini --fail-on high --format sarif --out quirn.sarif
+```
+
+`quirn scan --target <url>` is the only required flag; see `quirn help` for the full flag list (`--model`, `--judge-model`, `--fail-on`, `--format`, `--concurrency`, `--out`). The process exits non-zero when a finding at or above `--fail-on` is present, so it gates a CI build directly.
+
+### GitHub Action
+
+No tagged release exists yet, so the action ([`action.yml`](action.yml)) builds the binary from source on every run. Add it to a workflow:
+
+```yaml
+- uses: wroughtery/quirn@main
+  with:
+    target: ${{ secrets.QUIRN_TARGET_URL }}
+    api-key: ${{ secrets.QUIRN_API_KEY }}
+    fail-on: high
+    format: sarif
+    output: quirn.sarif
+```
+
+See [`.github/workflows/quirn-example.yml`](.github/workflows/quirn-example.yml) for a full example that uploads the SARIF report to the GitHub Security tab.
+
 ## Positioning & roadmap
 
 - **Wedge (v0):** the CLI + GitHub Action above. Runs locally, no server, no DB.
