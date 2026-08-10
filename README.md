@@ -1,36 +1,48 @@
-# Cerberus  *(placeholder name — final name pending a naming scan)*
+# Cerberus  *(placeholder name — pick from the shortlist; Jailscope leading)*
 
-Open-source security testing for AI-powered apps. **Ships first as an LLM red-team tool**: point it at your chatbot or LLM endpoint and get an OWASP-LLM-Top-10 report of how it can be prompt-injected, jailbroken, or made to leak its system prompt. Grows from there into source-code and live-app security.
+**"gitleaks / trivy for LLM apps."** An open-source security linter for AI features: one line in CI runs an OWASP-LLM-Top-10 red-team against your chatbot or LLM endpoint and posts findings to the GitHub Security tab + the PR — zero config, zero Python, BYO-key. Grows from there into source-code and live-app security.
 
-## Positioning
+## The gap it fills
 
-- **Wedge (v0):** LLM red-teaming. Newest market, weakest incumbents, fastest to ship, most viral demo.
-- **Later heads:** AI-assisted SAST with automated fix-PRs, then black-box DAST — same brand, once the wedge has users.
+Every existing tool is either a **Python/Node package** (garak, promptfoo, PyRIT, Giskard, DeepTeam — need an interpreter, an env, and config authoring) or a **runtime guardrail** (LLM Guard, Rebuff, LlamaFirewall — post-ship defense, not pre-ship testing). Nobody ships a **dependency-free single binary** that a non-security developer drops into CI and gets OWASP coverage with no setup. That developer currently runs nothing. That's the wedge.
 
-The three-capability "platform" is the destination, not the starting point. Win one niche first.
+## v0 — what ships first
+
+- **Single static binary (Go).** `curl | sh` or a pinned GitHub Action. No pip, no npm, runs on any runner in seconds.
+- **Zero-config first run.** OWASP LLM Top 10 is the default policy; YAML is optional, not required on day one.
+- **BYO-key / local-model-first.** Target and judge run against any OpenAI-compatible or local (Ollama/llama.cpp) model. No vendor cloud, no telemetry — usable on regulated/private codebases.
+- **Native SARIF + PR gating.** Findings appear in the GitHub Security tab and as inline PR annotations; `--fail-on high` gates the build on a severity budget.
+- **Baseline / ratchet.** A `.baseline` file so PRs surface only *new* vulnerabilities — adopt at `--fail-on critical`, tighten over time. Stops teams disabling the gate.
+- **Probe classes:** prompt injection, jailbreak, system-prompt leakage, sensitive-data disclosure, insecure output handling, and **agent tool-abuse / excessive agency** (the fastest-growing risk, weakly covered by incumbents).
+
+## Positioning & roadmap
+
+- **Wedge (v0):** the CLI + GitHub Action above. Runs locally, no server, no DB.
+- **v1:** hosted dashboard (Next.js) — saved runs, trend-over-time, team sharing.
+- **v2:** second head — AI-assisted SAST with fix-PRs, or black-box DAST. Pick by traction.
+- **v3:** unify into the full platform.
 
 ## Distribution & model
 
 - **Open-core, Apache-2.0.** Adoption first; monetize a hosted layer later.
-- **BYO-key + local models (Ollama).** Runs on the user's own keys/models — you never subsidize strangers' AI bills, and security teams can keep everything on-prem.
-- **Single-binary CLI + GitHub Action.** Drops into any CI. Low time-to-first-value.
+- **CI-native.** A Marketplace Action (`uses: <name>/action@v1`) that works with zero inputs and comments a scorecard — the path that drove trivy/gitleaks/semgrep.
 - **Wroughtery product.** Own name, own site, own branding — listed as a Wroughtery product alongside KeepWinning, so it spreads on its own name while every adopter still lands on Wroughtery.
 
 ## Stack
 
 | Layer | Tech |
 |---|---|
-| Red-team core (v0) | **Python** — FastAPI (optional), provider SDKs / LangGraph, BYO-key. No server or DB required to run locally |
+| Red-team core (v0) | **Go** — single static binary; `cobra` CLI, stdlib `net/http`, goroutines for concurrent probes; SARIF output. No runtime dependency |
 | Dashboard (v1+) | Next.js + TypeScript + Tailwind + shadcn/ui |
-| Security engine (later heads) | **Go** (`chi`, `river`) for concurrent scanning; Docker sandbox |
+| Security engine (later DAST head) | Go (`chi`, `river`) + Docker sandbox |
 | Data (v1+) | Postgres; artifacts on S3-compatible storage (R2) |
 
-See [`docs/architecture.md`](docs/architecture.md) for data flow, the phased roadmap, and the schema.
+See [`docs/architecture.md`](docs/architecture.md).
 
 ## Safety — non-negotiable
 
-Test only LLM endpoints and targets you **own or are authorized to test**. For the later DAST head, the domain-ownership verification gate is a hard blocker: no active scan fires against an unverified target. For development, use your own apps or intentionally-vulnerable practice targets (OWASP Juice Shop, DVWA, Gruyere). Lead the write-up with these controls — the safety engineering is as much the product as the scanner.
+Test only LLM endpoints and targets you **own or are authorized to test**. For the later DAST head, the domain-ownership verification gate is a hard blocker: no active scan against an unverified target. Lead the write-up with these controls — the safety engineering is as much the product as the scanner.
 
 ## Status
 
-Pre-v0. Direction locked: **LLM red-team wedge, open-core, BYO-key, Wroughtery sub-brand.** Naming scan in progress. Scaffold next.
+Pre-v0. Direction locked: **LLM red-team wedge, Go single-binary core, open-core, BYO-key, Wroughtery sub-brand.** Name selection + `wroughtery` org next, then scaffold.
