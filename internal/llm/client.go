@@ -19,6 +19,16 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// maxResponseBytes caps how much of a target response quirn will read into
+// memory. quirn is pointed at endpoints it does not trust, so an endless or
+// enormous body must not be able to OOM the process.
+const maxResponseBytes = 8 << 20 // 8 MiB
+
+// defaultHTTPClient is used when a Client is constructed without one (e.g. a
+// struct literal). It is shared and read-only, so concurrent probes can use it
+// without a data race.
+var defaultHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
 // Client talks to an OpenAI-compatible /v1/chat/completions endpoint.
 type Client struct {
 	BaseURL    string
@@ -59,8 +69,12 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (st
 	if c == nil {
 		return "", fmt.Errorf("llm: nil client")
 	}
-	if c.HTTPClient == nil {
-		c.HTTPClient = &http.Client{Timeout: 60 * time.Second}
+	// Resolve into a local rather than writing c.HTTPClient: the runner shares
+	// one *Client across concurrent probe goroutines, so mutating the field
+	// here would be a data race.
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		httpClient = defaultHTTPClient
 	}
 
 	reqBody, err := json.Marshal(chatRequest{Model: model, Messages: messages})
@@ -78,15 +92,20 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (st
 		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
 
-	resp, err := c.HTTPClient.Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return "", fmt.Errorf("llm: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Bound the read: an untrusted target must not be able to stream an
+	// unbounded body into memory. maxResponseBytes+1 lets us detect overflow.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("llm: read response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return "", fmt.Errorf("llm: response exceeds %d bytes; refusing to buffer", maxResponseBytes)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

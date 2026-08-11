@@ -12,8 +12,8 @@ Every existing tool is either a **Python/Node package** (garak, promptfoo, PyRIT
 - **Zero-config first run.** OWASP LLM Top 10 is the default policy; YAML is optional, not required on day one.
 - **BYO-key / local-model-first.** Target and judge run against any OpenAI-compatible or local (Ollama/llama.cpp) model. No vendor cloud, no telemetry — usable on regulated/private codebases.
 - **Native SARIF + PR gating.** Findings appear in the GitHub Security tab and as inline PR annotations; `--fail-on high` gates the build on a severity budget.
-- **Baseline / ratchet.** A `.baseline` file so PRs surface only *new* vulnerabilities — adopt at `--fail-on critical`, tighten over time. Stops teams disabling the gate.
-- **Probe classes:** prompt injection, jailbreak, system-prompt leakage, sensitive-data disclosure, insecure output handling, and **agent tool-abuse / excessive agency** (the fastest-growing risk, weakly covered by incumbents).
+- **Baseline / ratchet.** A baseline file so PRs surface only *new* vulnerabilities — snapshot with `--write-baseline`, then adopt at `--fail-on critical` and tighten over time. Stops teams disabling the gate.
+- **Probe classes (shipped):** prompt injection / jailbreak (LLM01), sensitive information disclosure (LLM02), improper output handling (LLM05), **excessive agency / tool-abuse** (LLM06, the fastest-growing risk, weakly covered by incumbents), and system-prompt leakage (LLM07). Each finding is judged by a BYO-key model and tagged with its OWASP LLM Top 10 class.
 
 ## Usage
 
@@ -25,7 +25,23 @@ export QUIRN_API_KEY=sk-...
 ./quirn scan --target https://api.openai.com --model gpt-4o-mini --fail-on high --format sarif --out quirn.sarif
 ```
 
-`quirn scan --target <url>` is the only required flag; see `quirn help` for the full flag list (`--model`, `--judge-model`, `--fail-on`, `--format`, `--concurrency`, `--out`). The process exits non-zero when a finding at or above `--fail-on` is present, so it gates a CI build directly.
+`quirn scan --target <url>` is the only required flag; see `quirn help` for the full flag list (`--model`, `--judge-model`, `--fail-on`, `--fail-on-inconclusive`, `--format`, `--concurrency`, `--timeout`, `--baseline`, `--write-baseline`, `--out`). `--format` accepts `text` (default), `json`, `sarif`, or `markdown` (a PR-comment scorecard).
+
+**Exit codes:** `0` clean, `1` a finding at or above `--fail-on` (or the scan reached no verdict), `2` a usage error. Crucially the gate is **fail-closed**: if every probe is inconclusive — a wrong key, an unreachable target, a blown `--timeout` — quirn exits non-zero instead of reporting a false green, so a misconfigured CI run can't masquerade as a pass. Add `--fail-on-inconclusive` to also fail when *any* probe couldn't be scored.
+
+### Baseline (ratchet)
+
+Adopt on a noisy codebase without disabling the gate: snapshot today's findings once, then only *new* vulnerabilities break the build.
+
+```sh
+# 1. Accept the current findings (writes the file, exits 0)
+./quirn scan --target <url> --baseline .quirn-baseline.json --write-baseline
+
+# 2. From now on, gate only on regressions — baselined findings are suppressed
+./quirn scan --target <url> --baseline .quirn-baseline.json --fail-on high
+```
+
+Baselined findings are excluded from both the severity gate and the SARIF output, so the Security tab and the PR show only what's new. Commit `.quirn-baseline.json` and tighten `--fail-on` over time.
 
 ### GitHub Action
 
@@ -73,4 +89,6 @@ Test only LLM endpoints and targets you **own or are authorized to test**. For t
 
 ## Status
 
-Pre-v0. Locked: **name Quirn, LLM red-team wedge, Go single-binary core, open-core, BYO-key, Wroughtery sub-brand.** Repo lives at `wroughtery/quirn`. Go CLI scaffold in progress.
+Building v0. Locked: **name Quirn, LLM red-team wedge, Go single-binary core, open-core, BYO-key, Wroughtery sub-brand.** Repo lives at `wroughtery/quirn`.
+
+Working today: `scan` against any OpenAI-compatible endpoint; five OWASP probe classes (LLM01/02/05/06/07) with an LLM judge; `text`/`json`/`sarif`/`markdown` reports; baseline ratchet (`--baseline` / `--write-baseline`); `--fail-on` severity gate; concurrent probe execution; and a GitHub Action. Test suite covers the CLI, judge, probes, reports, baseline, and client. Not yet: remaining OWASP classes, YAML policy config, `curl | sh` release artifacts, and the v1 hosted dashboard.

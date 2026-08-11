@@ -92,23 +92,28 @@ func WriteSARIF(w io.Writer, results []probe.Result, target string) error {
 	sarifResults := make([]sarifResult, 0, len(results))
 
 	for _, r := range results {
+		// The SARIF rule id must be unique within the driver, so it is keyed on
+		// the probe id (one rule per probe) rather than the OWASP class, which
+		// can repeat across probes. The OWASP tag is carried in the rule name.
 		if !seen[r.ProbeID] {
 			seen[r.ProbeID] = true
 			rules = append(rules, sarifRule{
-				ID:               r.OWASP,
+				ID:               r.ProbeID,
 				Name:             r.Name,
 				ShortDescription: sarifMultiformat{Text: r.Name + " (" + r.OWASP + ")"},
 			})
 		}
 
-		if !r.Vulnerable {
+		// Baselined findings are accepted, so they are not re-reported to the
+		// Security tab; only new vulnerabilities produce SARIF results.
+		if !r.Vulnerable || r.Baselined {
 			continue
 		}
 
 		sarifResults = append(sarifResults, sarifResult{
-			RuleID:  r.OWASP,
+			RuleID:  r.ProbeID,
 			Level:   severityToLevel(r.Severity),
-			Message: sarifMultiformat{Text: r.Evidence},
+			Message: sarifMultiformat{Text: r.OWASP + " " + r.Name + " (" + r.Severity + ")\n" + r.Evidence},
 			Locations: []sarifLocation{
 				{
 					PhysicalLocation: sarifPhysicalLocation{

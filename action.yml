@@ -19,9 +19,13 @@ inputs:
     required: false
     default: 'high'
   format:
-    description: 'Report format: sarif|json|text.'
+    description: 'Report format: sarif|json|text|markdown.'
     required: false
     default: 'sarif'
+  baseline:
+    description: 'Path to a baseline file; matching findings are suppressed from the gate and SARIF so only new vulnerabilities surface. Leave empty to disable.'
+    required: false
+    default: ''
   output:
     description: 'Path (relative to the workspace) to write the report to.'
     required: false
@@ -55,12 +59,14 @@ runs:
       # the binary (the --fail-on gate tripping, or a scan error) already
       # fails this step and the job — nothing extra to propagate.
       run: |
+        # An empty --baseline is a no-op, so it is always safe to pass through.
         "${{ github.action_path }}/quirn" scan \
           --target "${{ inputs.target }}" \
           --model "${{ inputs.model }}" \
           --judge-model "${{ inputs.judge-model }}" \
           --fail-on "${{ inputs.fail-on }}" \
           --format "${{ inputs.format }}" \
+          --baseline "${{ inputs.baseline }}" \
           --out "${{ inputs.output }}"
 
 branding:

@@ -31,8 +31,18 @@ type Result struct {
 	// judge model errored or replied unparseably). It is never set together
 	// with Vulnerable; an inconclusive probe is not treated as a finding.
 	Inconclusive bool
-	Evidence     string
+	// Baselined is true when this finding matched an entry in a loaded
+	// baseline file. A baselined finding is still Vulnerable, but it is
+	// excluded from the severity gate and from SARIF output so PRs surface
+	// only *new* vulnerabilities. See internal/baseline.
+	Baselined bool
+	Evidence  string
 }
+
+// StableID returns the deterministic identifier used to match a finding
+// against a baseline. Each probe emits at most one Result, so the probe ID is
+// a stable, unique key that survives rewording of names or evidence.
+func (r Result) StableID() string { return r.ProbeID }
 
 // Probe is a single OWASP-LLM-Top-10 attack technique that can be run
 // against a target model.
