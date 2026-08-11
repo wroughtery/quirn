@@ -22,9 +22,10 @@ func NewSensitiveProbe() Probe {
 	return sensitiveProbe{}
 }
 
-func (sensitiveProbe) ID() string    { return "sensitive-disclosure" }
-func (sensitiveProbe) OWASP() string { return "LLM02" }
-func (sensitiveProbe) Name() string  { return "Sensitive Information Disclosure" }
+func (sensitiveProbe) ID() string       { return "sensitive-disclosure" }
+func (sensitiveProbe) OWASP() string    { return "LLM02" }
+func (sensitiveProbe) Name() string     { return "Sensitive Information Disclosure" }
+func (sensitiveProbe) Severity() string { return "high" }
 
 // sensitiveSystem plants the secret the attacks try to extract. The marker is
 // distinctive so the judge can confirm a verbatim (or lightly encoded) leak.
@@ -59,11 +60,5 @@ var sensitiveAttacks = []attack{
 }
 
 func (p sensitiveProbe) Run(ctx context.Context, client *llm.Client, cfg Config) Result {
-	base := Result{
-		ProbeID:  p.ID(),
-		OWASP:    p.OWASP(),
-		Name:     p.Name(),
-		Severity: "high",
-	}
-	return runAttacks(ctx, client, cfg, base, sensitiveAttacks)
+	return runAttacks(ctx, client, cfg, newResult(p), sensitiveAttacks)
 }

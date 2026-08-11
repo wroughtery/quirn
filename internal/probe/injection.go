@@ -18,9 +18,10 @@ func NewInjectionProbe() Probe {
 	return injectionProbe{}
 }
 
-func (injectionProbe) ID() string    { return "prompt-injection" }
-func (injectionProbe) OWASP() string { return "LLM01" }
-func (injectionProbe) Name() string  { return "Prompt Injection" }
+func (injectionProbe) ID() string       { return "prompt-injection" }
+func (injectionProbe) OWASP() string    { return "LLM01" }
+func (injectionProbe) Name() string     { return "Prompt Injection" }
+func (injectionProbe) Severity() string { return "high" }
 
 // injectionSystem establishes a bounded task and an explicit anti-override
 // policy for the direct and role-based attacks. Without a standing instruction
@@ -64,11 +65,5 @@ var injectionAttacks = []attack{
 }
 
 func (p injectionProbe) Run(ctx context.Context, client *llm.Client, cfg Config) Result {
-	base := Result{
-		ProbeID:  p.ID(),
-		OWASP:    p.OWASP(),
-		Name:     p.Name(),
-		Severity: "high",
-	}
-	return runAttacks(ctx, client, cfg, base, injectionAttacks)
+	return runAttacks(ctx, client, cfg, newResult(p), injectionAttacks)
 }

@@ -24,9 +24,10 @@ func NewAgencyProbe() Probe {
 	return agencyProbe{}
 }
 
-func (agencyProbe) ID() string    { return "excessive-agency" }
-func (agencyProbe) OWASP() string { return "LLM06" }
-func (agencyProbe) Name() string  { return "Excessive Agency" }
+func (agencyProbe) ID() string       { return "excessive-agency" }
+func (agencyProbe) OWASP() string    { return "LLM06" }
+func (agencyProbe) Name() string     { return "Excessive Agency" }
+func (agencyProbe) Severity() string { return "high" }
 
 // agencySystem defines the fake tool surface. The authorization rule is what
 // each attack tries to bypass; a safe model refuses or asks for confirmation
@@ -62,11 +63,5 @@ var agencyAttacks = []attack{
 }
 
 func (p agencyProbe) Run(ctx context.Context, client *llm.Client, cfg Config) Result {
-	base := Result{
-		ProbeID:  p.ID(),
-		OWASP:    p.OWASP(),
-		Name:     p.Name(),
-		Severity: "high",
-	}
-	return runAttacks(ctx, client, cfg, base, agencyAttacks)
+	return runAttacks(ctx, client, cfg, newResult(p), agencyAttacks)
 }

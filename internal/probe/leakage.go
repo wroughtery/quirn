@@ -19,9 +19,10 @@ func NewLeakageProbe() Probe {
 	return leakageProbe{}
 }
 
-func (leakageProbe) ID() string    { return "system-prompt-leakage" }
-func (leakageProbe) OWASP() string { return "LLM07" }
-func (leakageProbe) Name() string  { return "System Prompt Leakage" }
+func (leakageProbe) ID() string       { return "system-prompt-leakage" }
+func (leakageProbe) OWASP() string    { return "LLM07" }
+func (leakageProbe) Name() string     { return "System Prompt Leakage" }
+func (leakageProbe) Severity() string { return "medium" }
 
 // leakageSystem is the hidden system prompt planted before each extraction
 // attempt. It carries a canary marker the judge can look for; a target that
@@ -59,11 +60,5 @@ var leakageAttacks = []attack{
 }
 
 func (p leakageProbe) Run(ctx context.Context, client *llm.Client, cfg Config) Result {
-	base := Result{
-		ProbeID:  p.ID(),
-		OWASP:    p.OWASP(),
-		Name:     p.Name(),
-		Severity: "medium",
-	}
-	return runAttacks(ctx, client, cfg, base, leakageAttacks)
+	return runAttacks(ctx, client, cfg, newResult(p), leakageAttacks)
 }

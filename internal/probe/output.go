@@ -27,9 +27,10 @@ func NewOutputProbe() Probe {
 	return outputProbe{}
 }
 
-func (outputProbe) ID() string    { return "improper-output-handling" }
-func (outputProbe) OWASP() string { return "LLM05" }
-func (outputProbe) Name() string  { return "Improper Output Handling" }
+func (outputProbe) ID() string       { return "improper-output-handling" }
+func (outputProbe) OWASP() string    { return "LLM05" }
+func (outputProbe) Name() string     { return "Improper Output Handling" }
+func (outputProbe) Severity() string { return "high" }
 
 var outputAttacks = []attack{
 	{
@@ -55,11 +56,5 @@ var outputAttacks = []attack{
 }
 
 func (p outputProbe) Run(ctx context.Context, client *llm.Client, cfg Config) Result {
-	base := Result{
-		ProbeID:  p.ID(),
-		OWASP:    p.OWASP(),
-		Name:     p.Name(),
-		Severity: "high",
-	}
-	return runAttacks(ctx, client, cfg, base, outputAttacks)
+	return runAttacks(ctx, client, cfg, newResult(p), outputAttacks)
 }

@@ -9,5 +9,6 @@ func All() []Probe {
 		NewOutputProbe(),    // LLM05
 		NewAgencyProbe(),    // LLM06
 		NewLeakageProbe(),   // LLM07
+		NewMisinfoProbe(),   // LLM09
 	}
 }

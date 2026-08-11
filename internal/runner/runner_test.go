@@ -19,9 +19,10 @@ type stubProbe struct {
 	onRun func()
 }
 
-func (s stubProbe) ID() string    { return s.id }
-func (s stubProbe) OWASP() string { return "LLM01" }
-func (s stubProbe) Name() string  { return s.id }
+func (s stubProbe) ID() string       { return s.id }
+func (s stubProbe) OWASP() string    { return "LLM01" }
+func (s stubProbe) Name() string     { return s.id }
+func (s stubProbe) Severity() string { return "high" }
 func (s stubProbe) Run(ctx context.Context, _ *llm.Client, _ probe.Config) probe.Result {
 	if s.onRun != nil {
 		s.onRun()

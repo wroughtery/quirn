@@ -135,8 +135,8 @@ func TestInconclusiveWhenSomeFailAndRestSafe(t *testing.T) {
 
 func TestAllProbesWellFormed(t *testing.T) {
 	probes := All()
-	if len(probes) != 5 {
-		t.Fatalf("want 5 probes, got %d", len(probes))
+	if len(probes) != 6 {
+		t.Fatalf("want 6 probes, got %d", len(probes))
 	}
 	seenID := map[string]bool{}
 	seenOWASP := map[string]bool{}
@@ -155,14 +155,16 @@ func TestAllProbesWellFormed(t *testing.T) {
 
 		// Severity must be a value the gate recognizes; an unknown severity is
 		// silently skipped by GateFailed, so a typo here would make the probe
-		// un-gateable. Run each probe once (no verdict reachable) to read its
-		// seeded Severity.
-		res := p.Run(context.Background(), nil, Config{})
-		if !knownSeverities[res.Severity] {
-			t.Errorf("probe %q has unknown severity %q", p.ID(), res.Severity)
+		// un-gateable.
+		if !knownSeverities[p.Severity()] {
+			t.Errorf("probe %q has unknown severity %q", p.ID(), p.Severity())
+		}
+		// The seeded Result must carry that same severity.
+		if res := p.Run(context.Background(), nil, Config{}); res.Severity != p.Severity() {
+			t.Errorf("probe %q Run severity %q != Severity() %q", p.ID(), res.Severity, p.Severity())
 		}
 	}
-	for _, want := range []string{"LLM01", "LLM02", "LLM05", "LLM06", "LLM07"} {
+	for _, want := range []string{"LLM01", "LLM02", "LLM05", "LLM06", "LLM07", "LLM09"} {
 		if !seenOWASP[want] {
 			t.Errorf("missing OWASP class %q", want)
 		}

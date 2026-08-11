@@ -255,3 +255,53 @@ func TestRunNoArgs(t *testing.T) {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 }
+
+func TestRunVersion(t *testing.T) {
+	for _, arg := range []string{"version", "--version", "-v"} {
+		if code := run([]string{arg}); code != 0 {
+			t.Errorf("%q exit = %d, want 0", arg, code)
+		}
+	}
+}
+
+func TestRunListProbesNeedsNoTarget(t *testing.T) {
+	// --list-probes is informational and must work without --target or a key.
+	if code := run([]string{"scan", "--list-probes"}); code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+}
+
+// TestRunOnlyScopesTheScan checks --only actually restricts which probes run:
+// scanning only LLM02 against a server where LLM01's marker would be vulnerable
+// must NOT produce an injection finding.
+func TestRunOnlyScopesTheScan(t *testing.T) {
+	url, _ := scriptedServer(t, []string{injMarker}, false) // injection would be vulnerable
+	out := filepath.Join(t.TempDir(), "r.json")
+	code := run([]string{"scan", "--target", url, "--only", "LLM02", "--format", "json", "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (only LLM02, which is safe here)", code)
+	}
+	var results []struct {
+		ProbeID string `json:"ProbeID"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, out)), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ProbeID != "sensitive-disclosure" {
+		t.Errorf("only LLM02 should run just sensitive-disclosure, got %+v", results)
+	}
+}
+
+func TestRunUnknownProbeErrors(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	if code := run([]string{"scan", "--target", url, "--only", "LLM99"}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (unknown --only probe)", code)
+	}
+}
+
+func TestRunEmptySelectionErrors(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	if code := run([]string{"scan", "--target", url, "--only", "LLM01", "--skip", "LLM01"}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (no probes selected)", code)
+	}
+}

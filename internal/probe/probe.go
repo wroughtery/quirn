@@ -53,6 +53,10 @@ type Probe interface {
 	OWASP() string
 	// Name is a short human-readable name for the probe.
 	Name() string
+	// Severity is the finding severity this probe reports when vulnerable
+	// (low|medium|high|critical). Exposed on the interface so probes can be
+	// listed and gated on without executing them.
+	Severity() string
 	// Run executes the probe against the target described by cfg and
 	// returns a Result. Run should not panic; errors talking to the target
 	// should be reflected in the Result's Evidence field.

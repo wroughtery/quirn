@@ -20,6 +20,17 @@ type attack struct {
 	payload string
 }
 
+// newResult seeds a Result from a probe's identity and severity, so each
+// probe's Run body does not repeat the four-field boilerplate.
+func newResult(p Probe) Result {
+	return Result{
+		ProbeID:  p.ID(),
+		OWASP:    p.OWASP(),
+		Name:     p.Name(),
+		Severity: p.Severity(),
+	}
+}
+
 // runAttacks runs every attack in attacks against the target, judges each
 // outcome, and folds the per-attempt verdicts into a single Result seeded from
 // base. The Result is Vulnerable if ANY attempt is judged vulnerable; it is

@@ -8,7 +8,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"quirn/internal/baseline"
@@ -22,6 +24,8 @@ const helpText = `quirn - LLM red-team CLI (OWASP LLM Top 10)
 
 Usage:
   quirn scan --target <url> [flags]
+  quirn version
+  quirn help
 
 Flags:
   --target string        Base URL of the OpenAI-compatible endpoint under test (required)
@@ -33,6 +37,9 @@ Flags:
   --format string         Report format: sarif|json|text|markdown (default "text")
   --concurrency int       Max probes to run concurrently (default 4)
   --timeout duration      Overall scan deadline, e.g. 10m or 0 to disable (default 10m)
+  --only string           Run only these probes (comma-separated probe IDs or OWASP ids, e.g. LLM01,excessive-agency)
+  --skip string           Skip these probes (comma-separated probe IDs or OWASP ids)
+  --list-probes           Print the available probes and exit
   --baseline string       Path to a baseline file; matching findings are suppressed from the gate and SARIF
   --write-baseline        Snapshot the current findings to the --baseline path and exit 0 (accept them)
   --out string            Path to write the report to (default: stdout)
@@ -45,6 +52,10 @@ Examples:
   quirn scan --target http://localhost:1234 --baseline .quirn-baseline.json --write-baseline
   quirn scan --target http://localhost:1234 --baseline .quirn-baseline.json --fail-on high
 `
+
+// version is the tool version, overridable at build time with
+// -ldflags "-X main.version=v1.2.3".
+var version = "0.0.1"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -61,6 +72,9 @@ func run(args []string) int {
 	switch args[0] {
 	case "scan":
 		return runScan(args[1:])
+	case "version", "--version", "-v":
+		fmt.Printf("quirn %s\n", version)
+		return 0
 	case "-h", "--help", "help":
 		fmt.Print(helpText)
 		return 0
@@ -83,6 +97,9 @@ func runScan(args []string) int {
 	format := fs.String("format", "text", "Report format: sarif|json|text|markdown")
 	concurrency := fs.Int("concurrency", runner.DefaultConcurrency, "Max probes to run concurrently")
 	timeout := fs.Duration("timeout", 10*time.Minute, "Overall scan deadline (0 disables)")
+	only := fs.String("only", "", "Run only these probes (comma-separated probe IDs or OWASP ids)")
+	skip := fs.String("skip", "", "Skip these probes (comma-separated probe IDs or OWASP ids)")
+	listProbes := fs.Bool("list-probes", false, "Print the available probes and exit")
 	baselinePath := fs.String("baseline", "", "Path to a baseline file; matching findings are suppressed")
 	writeBaseline := fs.Bool("write-baseline", false, "Snapshot current findings to --baseline and exit 0")
 	out := fs.String("out", "", "Path to write the report to (default: stdout)")
@@ -90,6 +107,12 @@ func runScan(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		// flag already printed its own error/usage.
 		return 2
+	}
+
+	// --list-probes is informational and needs no target/key.
+	if *listProbes {
+		printProbes(os.Stdout)
+		return 0
 	}
 
 	if *judgeModel == "" {
@@ -118,6 +141,16 @@ func runScan(args []string) int {
 	}
 	if *writeBaseline && *baselinePath == "" {
 		fmt.Fprintln(os.Stderr, "quirn: --write-baseline requires --baseline <path>")
+		return 2
+	}
+
+	probes, err := probe.Select(splitList(*only), splitList(*skip))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+		return 2
+	}
+	if len(probes) == 0 {
+		fmt.Fprintln(os.Stderr, "quirn: no probes selected (check --only/--skip)")
 		return 2
 	}
 
@@ -159,7 +192,7 @@ func runScan(args []string) int {
 		defer cancel()
 	}
 
-	results := runner.Run(ctx, client, cfg, probe.All(), *concurrency)
+	results := runner.Run(ctx, client, cfg, probes, *concurrency)
 
 	// Apply the baseline: matching findings are marked Baselined and drop out of
 	// the gate and SARIF output.
@@ -201,6 +234,29 @@ func runScan(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// splitList splits a comma-separated flag value into trimmed, non-empty tokens.
+func splitList(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := parts[:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// printProbes writes the available probes (id, OWASP, severity, name) to w.
+func printProbes(w io.Writer) {
+	fmt.Fprintf(w, "%-24s %-8s %-10s %s\n", "PROBE", "OWASP", "SEVERITY", "NAME")
+	for _, p := range probe.All() {
+		fmt.Fprintf(w, "%-24s %-8s %-10s %s\n", p.ID(), p.OWASP(), p.Severity(), p.Name())
+	}
 }
 
 // validFormat reports whether f is a report format writeReport can render.
