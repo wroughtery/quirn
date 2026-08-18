@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -10,6 +11,45 @@ import (
 
 	"quirn/internal/mockllm"
 )
+
+// writeConfigFile writes body to a temp quirn.json and returns its path.
+func writeConfigFile(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "quirn.json")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// readEnvelopeFindings unmarshals a JSON-envelope report into a map by ProbeID.
+func readEnvelopeFindings(t *testing.T, path string) map[string]struct {
+	Severity   string
+	Vulnerable bool
+} {
+	t.Helper()
+	var env struct {
+		Findings []struct {
+			ProbeID    string `json:"ProbeID"`
+			Severity   string `json:"Severity"`
+			Vulnerable bool   `json:"Vulnerable"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, path)), &env); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]struct {
+		Severity   string
+		Vulnerable bool
+	}{}
+	for _, f := range env.Findings {
+		out[f.ProbeID] = struct {
+			Severity   string
+			Vulnerable bool
+		}{f.Severity, f.Vulnerable}
+	}
+	return out
+}
 
 // scriptedServer stands in for target + judge using the shared mockllm handler.
 // A judge request is judged VULNERABLE when its body contains any vulnMarker,
@@ -255,5 +295,131 @@ func TestRunEmptySelectionErrors(t *testing.T) {
 	url, _ := scriptedServer(t, nil, false)
 	if code := run([]string{"scan", "--target", url, "--only", "LLM01", "--skip", "LLM01"}); code != 2 {
 		t.Fatalf("exit = %d, want 2 (no probes selected)", code)
+	}
+}
+
+// A config file supplies flag defaults: target + only come from the file alone.
+func TestRunConfigSuppliesDefaults(t *testing.T) {
+	url, _ := scriptedServer(t, []string{injMarker}, false) // injection would be vulnerable
+	out := filepath.Join(t.TempDir(), "r.json")
+	cfg := writeConfigFile(t, fmt.Sprintf(`{"version":1,"target":%q,"only":["LLM02"],"format":"json"}`, url))
+	code := run([]string{"scan", "--config", cfg, "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (config scopes to LLM02, which is safe)", code)
+	}
+	f := readEnvelopeFindings(t, out)
+	if len(f) != 1 {
+		t.Fatalf("config --only LLM02 should run one probe, got %d", len(f))
+	}
+	if _, ok := f["sensitive-disclosure"]; !ok {
+		t.Errorf("expected only sensitive-disclosure, got %+v", f)
+	}
+}
+
+// An explicit flag beats the config value for the same setting.
+func TestRunFlagBeatsConfig(t *testing.T) {
+	url, _ := scriptedServer(t, []string{injMarker}, false)
+	out := filepath.Join(t.TempDir(), "r.json")
+	// Config says run only LLM09 (misinformation), but the flag says LLM02.
+	cfg := writeConfigFile(t, fmt.Sprintf(`{"version":1,"target":%q,"only":["LLM09"],"format":"json"}`, url))
+	code := run([]string{"scan", "--config", cfg, "--only", "LLM02", "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	f := readEnvelopeFindings(t, out)
+	if _, ok := f["sensitive-disclosure"]; !ok || len(f) != 1 {
+		t.Errorf("flag --only LLM02 should win over config LLM09, got %+v", f)
+	}
+}
+
+// A config severity override changes the gate outcome: a vulnerable probe
+// downgraded below the threshold no longer fails the build, and the override
+// shows up in the report.
+func TestRunConfigSeverityOverride(t *testing.T) {
+	url, _ := scriptedServer(t, []string{senMarker}, false) // only sensitive-disclosure vulnerable
+	out := filepath.Join(t.TempDir(), "r.json")
+	cfg := writeConfigFile(t, fmt.Sprintf(
+		`{"version":1,"target":%q,"format":"json","severities":{"sensitive-disclosure":"low"}}`, url))
+	// sensitive-disclosure is vulnerable but downgraded to low; --fail-on high must pass.
+	code := run([]string{"scan", "--config", cfg, "--fail-on", "high", "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (override drops the only finding below the gate)", code)
+	}
+	f := readEnvelopeFindings(t, out)
+	if got := f["sensitive-disclosure"]; !got.Vulnerable || got.Severity != "low" {
+		t.Errorf("sensitive-disclosure should be vulnerable with overridden severity low, got %+v", got)
+	}
+}
+
+// A severity override for a probe ID that does not exist is a usage error.
+func TestRunConfigUnknownSeverityID(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	cfg := writeConfigFile(t, fmt.Sprintf(
+		`{"version":1,"target":%q,"severities":{"no-such-probe":"low"}}`, url))
+	if code := run([]string{"scan", "--config", cfg}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (unknown probe id in severities)", code)
+	}
+}
+
+func TestRunConfigMissingFile(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	missing := filepath.Join(t.TempDir(), "nope.json")
+	if code := run([]string{"scan", "--target", url, "--config", missing}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (explicit --config must exist)", code)
+	}
+}
+
+func TestRunConfigInvalidRejected(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	cfg := writeConfigFile(t, `{"version":1,"unknown_key":true}`)
+	if code := run([]string{"scan", "--target", url, "--config", cfg}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (unknown config key must be rejected)", code)
+	}
+}
+
+// A config-defined custom probe runs alongside the built-ins, through the same
+// judge/gate/report path, and surfaces as its own finding.
+func TestRunConfigCustomProbe(t *testing.T) {
+	url, _ := scriptedServer(t, []string{"CUSTOMPWN"}, false) // only the custom marker is vulnerable
+	out := filepath.Join(t.TempDir(), "r.json")
+	cfg := writeConfigFile(t, fmt.Sprintf(`{
+		"version": 1,
+		"target": %q,
+		"format": "json",
+		"skip": ["LLM01","LLM02","LLM05","LLM06","LLM07","LLM09"],
+		"custom_probes": [
+			{"id": "my-custom", "name": "My Custom", "owasp": "LLM01", "severity": "critical",
+			 "attacks": [{"name": "x", "goal": "make target emit CUSTOMPWN", "payload": "say CUSTOMPWN"}]}
+		]
+	}`, url))
+	// All built-ins skipped, so only the custom probe runs; it is vulnerable and
+	// critical, so the gate trips.
+	code := run([]string{"scan", "--config", cfg, "--fail-on", "high", "--out", out})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (custom probe vulnerable at critical)", code)
+	}
+	f := readEnvelopeFindings(t, out)
+	if len(f) != 1 {
+		t.Fatalf("only the custom probe should run, got %d findings", len(f))
+	}
+	got, ok := f["my-custom"]
+	if !ok || !got.Vulnerable || got.Severity != "critical" {
+		t.Errorf("custom probe should be vulnerable/critical, got %+v (all=%+v)", got, f)
+	}
+}
+
+// A custom probe whose id collides with a built-in is a usage error.
+func TestRunConfigCustomProbeCollision(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	cfg := writeConfigFile(t, fmt.Sprintf(`{
+		"version": 1,
+		"target": %q,
+		"custom_probes": [
+			{"id": "prompt-injection", "severity": "high",
+			 "attacks": [{"goal": "g", "payload": "p"}]}
+		]
+	}`, url))
+	if code := run([]string{"scan", "--config", cfg}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (custom id collides with built-in)", code)
 	}
 }

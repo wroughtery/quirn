@@ -16,8 +16,16 @@ hr() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
 hr "build";  go build ./... || exit 1
 hr "vet";    go vet ./...   || exit 1
-hr "test (coverage)"
-go test -cover ./... || exit 1
+
+# The race detector needs cgo and a C compiler. Use it when one is available
+# (CI runners, most Linux/macOS dev boxes); fall back to a plain run otherwise
+# (e.g. a Windows box with no gcc). CI's ci.yml always runs -race.
+race=""
+if command -v gcc >/dev/null 2>&1 || command -v clang >/dev/null 2>&1; then
+  race="-race"
+fi
+hr "test${race:+ (race)} (coverage)"
+go test $race -cover ./... || exit 1
 
 # Build both binaries into a scratch dir.
 bin="$(mktemp -d)"

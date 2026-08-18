@@ -19,7 +19,7 @@ inputs:
     required: false
     default: 'high'
   format:
-    description: 'Report format: sarif|json|text|markdown.'
+    description: 'Report format: sarif|json|text|markdown. Defaults to sarif in this Action (note: the quirn CLI itself defaults to text) so the output is ready to upload to the Security tab out of the box.'
     required: false
     default: 'sarif'
   baseline:
@@ -27,7 +27,7 @@ inputs:
     required: false
     default: ''
   output:
-    description: 'Path (relative to the workspace) to write the report to.'
+    description: 'Path (relative to the workspace) to write the report to. Defaults to quirn.sarif in this Action (note: the quirn CLI itself defaults to stdout) so there is a file on disk to feed to a follow-up upload step.'
     required: false
     default: 'quirn.sarif'
   api-key:
@@ -38,15 +38,66 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    # No releases exist yet, so every consumer builds the binary from the
-    # source checked out alongside this action.yml (github.action_path)
-    # rather than downloading a prebuilt artifact.
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version-file: ${{ github.action_path }}/go.mod
 
-    - name: Build quirn
+    # Map the runner to the GOOS/GOARCH naming release.yml publishes assets
+    # under (quirn_<goos>_<goarch>[.exe]) — keep both files in sync if this
+    # mapping or that naming ever changes. Unrecognized runner os/arch
+    # (e.g. self-hosted 32-bit) yields an empty `asset` and skips straight
+    # to the source-build fallback below.
+    - name: Resolve target platform
+      id: platform
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Linux) goos=linux ;;
+          macOS) goos=darwin ;;
+          Windows) goos=windows ;;
+          *) goos="" ;;
+        esac
+        case "${{ runner.arch }}" in
+          X64) goarch=amd64 ;;
+          ARM64) goarch=arm64 ;;
+          *) goarch="" ;;
+        esac
+        asset=""
+        if [ -n "$goos" ] && [ -n "$goarch" ]; then
+          ext=""
+          if [ "$goos" = "windows" ]; then ext=".exe"; fi
+          asset="quirn_${goos}_${goarch}${ext}"
+        fi
+        echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+    # Prefer a prebuilt binary from the GitHub Release matching the version
+    # this Action is pinned to (`uses: owner/repo@<ref>`). `action_ref`/
+    # `action_repository` are only populated when the action runs from a
+    # remote ref (empty for local `uses: ./` testing inside this repo), and
+    # `gh release download` fails non-zero for any reason — no matching
+    # release/tag, no matching asset, network error. continue-on-error
+    # means that failure never surfaces here; it is only observed via
+    # `steps.fetch.outcome` by the fallback build step below, so a broken
+    # or missing release can NEVER break a scan — source build is the
+    # guaranteed fallback.
+    - name: Try downloading a released binary
+      id: fetch
+      if: steps.platform.outputs.asset != '' && github.action_repository != '' && github.action_ref != ''
+      shell: bash
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release download "${{ github.action_ref }}" \
+          --repo "${{ github.action_repository }}" \
+          --pattern "${{ steps.platform.outputs.asset }}" \
+          --output "${{ github.action_path }}/quirn" \
+          --clobber
+        chmod +x "${{ github.action_path }}/quirn"
+
+    - name: Build quirn from source (fallback)
+      if: steps.fetch.outcome != 'success'
       shell: bash
       working-directory: ${{ github.action_path }}
       run: go build -o quirn .

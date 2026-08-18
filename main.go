@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"quirn/internal/baseline"
+	"quirn/internal/config"
 	"quirn/internal/llm"
 	"quirn/internal/probe"
 	"quirn/internal/report"
@@ -33,7 +35,7 @@ Flags:
   --api-key string        API key for the target endpoint (overrides QUIRN_API_KEY env var)
   --fail-on string        Minimum severity that fails the build: low|medium|high|critical (default "high")
   --fail-on-inconclusive  Also fail the build if any probe could not reach a verdict
-  --format string         Report format: sarif|json|text|markdown (default "text")
+  --format string         Report format: sarif|json|text|markdown (default "text"; "md" is an alias for "markdown")
   --concurrency int       Max probes to run concurrently (default 4)
   --timeout duration      Overall scan deadline, e.g. 10m or 0 to disable (default 10m)
   --max-retries int       Retries per model call on a transient error: 429/5xx/network (default 2)
@@ -43,6 +45,7 @@ Flags:
   --baseline string       Path to a baseline file; matching findings are suppressed from the gate and SARIF
   --write-baseline        Snapshot the current findings to the --baseline path and exit 0 (accept them)
   --out string            Path to write the report to (default: stdout)
+  --config string         JSON config file supplying flag defaults + per-probe severity overrides (flags still win)
 
 Exit codes: 0 = clean, 1 = findings gated / scan reached no verdict, 2 = usage error.
 
@@ -104,16 +107,70 @@ func runScan(args []string) int {
 	baselinePath := fs.String("baseline", "", "Path to a baseline file; matching findings are suppressed")
 	writeBaseline := fs.Bool("write-baseline", false, "Snapshot current findings to --baseline and exit 0")
 	out := fs.String("out", "", "Path to write the report to (default: stdout)")
+	configPath := fs.String("config", "", "Path to a JSON config file supplying flag defaults and per-probe severity overrides")
 
 	if err := fs.Parse(args); err != nil {
 		// flag already printed its own error/usage.
 		return 2
 	}
 
-	// --list-probes is informational and needs no target/key.
+	// --list-probes is informational and needs no target/key/config.
 	if *listProbes {
 		printProbes(os.Stdout)
 		return 0
+	}
+
+	// Load an optional JSON config and fold it in UNDER the flags: a value the
+	// user passed on the command line always wins, a config value fills an
+	// unset flag, and the built-in default fills the rest. Applied before any
+	// validation so the *effective* values are what we validate and scan with.
+	var conf *config.File
+	if *configPath != "" {
+		c, err := config.Load(*configPath)
+		switch {
+		case errors.Is(err, config.ErrNotExist):
+			fmt.Fprintf(os.Stderr, "quirn: --config %q not found\n", *configPath)
+			return 2
+		case err != nil:
+			fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+			return 2
+		default:
+			conf = c
+		}
+
+		set := map[string]bool{}
+		fs.Visit(func(fl *flag.Flag) { set[fl.Name] = true })
+		applyStr := func(name string, dst *string, val string) {
+			if !set[name] && val != "" {
+				*dst = val
+			}
+		}
+		applyStr("target", target, conf.Target)
+		applyStr("model", model, conf.Model)
+		applyStr("judge-model", judgeModel, conf.JudgeModel)
+		applyStr("fail-on", failOn, conf.FailOn)
+		applyStr("format", format, conf.Format)
+		applyStr("baseline", baselinePath, conf.Baseline)
+		if !set["only"] && len(conf.Only) > 0 {
+			*only = strings.Join(conf.Only, ",")
+		}
+		if !set["skip"] && len(conf.Skip) > 0 {
+			*skip = strings.Join(conf.Skip, ",")
+		}
+		if !set["fail-on-inconclusive"] && conf.FailOnInconclusive != nil {
+			*failOnInconclusive = *conf.FailOnInconclusive
+		}
+		if !set["concurrency"] && conf.Concurrency != nil {
+			*concurrency = *conf.Concurrency
+		}
+		if !set["max-retries"] && conf.MaxRetries != nil {
+			*maxRetries = *conf.MaxRetries
+		}
+		if !set["timeout"] {
+			if d, ok := conf.TimeoutDuration(); ok {
+				*timeout = d
+			}
+		}
 	}
 
 	if *judgeModel == "" {
@@ -132,7 +189,7 @@ func runScan(args []string) int {
 		fmt.Fprintln(os.Stderr, "quirn: --target <url> is required")
 		return 2
 	}
-	if !validFormat(*format) {
+	if !report.ValidFormat(*format) {
 		fmt.Fprintf(os.Stderr, "quirn: unknown --format %q (want sarif|json|text|markdown)\n", *format)
 		return 2
 	}
@@ -150,9 +207,41 @@ func runScan(args []string) int {
 		fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
 		return 2
 	}
+	// Append any config-defined custom probes. They run in addition to the
+	// selected built-ins, in a deterministic order (sorted by id) so reports and
+	// baselines stay diff-stable. Done before the empty-selection check so a run
+	// consisting only of custom probes (all built-ins skipped) is valid.
+	var customIDs []string
+	if conf != nil && len(conf.CustomProbes) > 0 {
+		builtin := map[string]bool{}
+		for _, p := range probe.All() {
+			builtin[p.ID()] = true
+		}
+		custom := append([]config.CustomProbe(nil), conf.CustomProbes...)
+		sort.Slice(custom, func(i, j int) bool { return custom[i].ID < custom[j].ID })
+		for _, cp := range custom {
+			if builtin[cp.ID] {
+				fmt.Fprintf(os.Stderr, "quirn: custom probe id %q collides with a built-in probe id\n", cp.ID)
+				return 2
+			}
+			probes = append(probes, buildCustomProbe(cp))
+			customIDs = append(customIDs, cp.ID)
+		}
+	}
+
 	if len(probes) == 0 {
-		fmt.Fprintln(os.Stderr, "quirn: no probes selected (check --only/--skip)")
+		fmt.Fprintln(os.Stderr, "quirn: no probes selected (check --only/--skip or custom_probes)")
 		return 2
+	}
+
+	// A severity override keyed on a probe ID that does not exist (neither a
+	// built-in nor a defined custom probe) is almost certainly a typo; fail
+	// loudly rather than silently ignoring it.
+	if conf != nil {
+		if unknown := unknownProbeIDs(conf.Severities, customIDs); len(unknown) > 0 {
+			fmt.Fprintf(os.Stderr, "quirn: config severities reference unknown probe id(s): %s\n", strings.Join(unknown, ", "))
+			return 2
+		}
 	}
 
 	// Load an existing baseline up front (unless we're about to overwrite it) so
@@ -197,6 +286,16 @@ func runScan(args []string) int {
 	}
 
 	results := runner.Run(ctx, client, cfg, probes, *concurrency)
+
+	// Apply config severity overrides before the gate, baseline, and reports so
+	// every downstream consumer sees the overridden severity.
+	if conf != nil && len(conf.Severities) > 0 {
+		for i := range results {
+			if sev, ok := conf.Severities[results[i].ProbeID]; ok {
+				results[i].Severity = sev
+			}
+		}
+	}
 
 	// Apply the baseline: matching findings are marked Baselined and drop out of
 	// the gate and SARIF output.
@@ -255,21 +354,56 @@ func splitList(s string) []string {
 	return out
 }
 
+// unknownProbeIDs returns the keys of sevs that match neither a built-in probe
+// ID nor one of the extra (custom) IDs, sorted for a stable error message.
+func unknownProbeIDs(sevs map[string]string, extra []string) []string {
+	if len(sevs) == 0 {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, p := range probe.All() {
+		known[p.ID()] = true
+	}
+	for _, id := range extra {
+		known[id] = true
+	}
+	var unknown []string
+	for id := range sevs {
+		if !known[id] {
+			unknown = append(unknown, id)
+		}
+	}
+	sort.Strings(unknown)
+	return unknown
+}
+
+// buildCustomProbe converts a config-defined custom probe into a runnable Probe,
+// filling in defaults for the optional name/owasp/attack-name fields.
+func buildCustomProbe(cp config.CustomProbe) probe.Probe {
+	name := cp.Name
+	if name == "" {
+		name = cp.ID
+	}
+	owasp := cp.OWASP
+	if owasp == "" {
+		owasp = "CUSTOM"
+	}
+	atks := make([]probe.Attack, len(cp.Attacks))
+	for i, a := range cp.Attacks {
+		nm := a.Name
+		if nm == "" {
+			nm = fmt.Sprintf("attack-%d", i+1)
+		}
+		atks[i] = probe.Attack{Name: nm, Goal: a.Goal, System: a.System, Payload: a.Payload}
+	}
+	return probe.NewCustom(cp.ID, name, owasp, cp.Severity, atks)
+}
+
 // printProbes writes the available probes (id, OWASP, severity, name) to w.
 func printProbes(w io.Writer) {
 	fmt.Fprintf(w, "%-24s %-8s %-10s %s\n", "PROBE", "OWASP", "SEVERITY", "NAME")
 	for _, p := range probe.All() {
 		fmt.Fprintf(w, "%-24s %-8s %-10s %s\n", p.ID(), p.OWASP(), p.Severity(), p.Name())
-	}
-}
-
-// validFormat reports whether f is a report format writeReport can render.
-func validFormat(f string) bool {
-	switch f {
-	case "sarif", "json", "markdown", "md", "text", "":
-		return true
-	default:
-		return false
 	}
 }
 

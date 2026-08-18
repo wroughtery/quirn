@@ -8,6 +8,10 @@
 # --- Go (root module + engine/) ---
 /quirn
 /quirn.exe
+/mockllm
+/mockllm.exe
+/cmd/mockllm/mockllm
+/cmd/mockllm/mockllm.exe
 *.test
 coverage.out
 /engine/bin/

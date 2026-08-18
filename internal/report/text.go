@@ -52,6 +52,19 @@ func ValidSeverity(s string) bool {
 	return ok
 }
 
+// ValidFormat reports whether f is a report format quirn can render. The empty
+// string is accepted and treated as the default ("text"). "md" is an alias for
+// "markdown". This is the single source of truth for --format / config format
+// validation shared by main and internal/config.
+func ValidFormat(f string) bool {
+	switch f {
+	case "sarif", "json", "markdown", "md", "text", "":
+		return true
+	default:
+		return false
+	}
+}
+
 // AllInconclusive reports whether every result failed to reach a verdict (the
 // target was unreachable, unauthorized, or too slow to score). An empty slice
 // returns false: there was nothing to test, which is a different condition.
