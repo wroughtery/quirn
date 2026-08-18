@@ -161,16 +161,18 @@ func TestRunBaselineActuallyConsultsSet(t *testing.T) {
 		t.Fatalf("gated run exit = %d, want 1 (new sensitive finding not in baseline)", code)
 	}
 
-	var results []struct {
-		ProbeID    string `json:"ProbeID"`
-		Vulnerable bool   `json:"Vulnerable"`
-		Baselined  bool   `json:"Baselined"`
+	var env struct {
+		Findings []struct {
+			ProbeID    string `json:"ProbeID"`
+			Vulnerable bool   `json:"Vulnerable"`
+			Baselined  bool   `json:"Baselined"`
+		} `json:"findings"`
 	}
-	if err := json.Unmarshal([]byte(readFile(t, out)), &results); err != nil {
+	if err := json.Unmarshal([]byte(readFile(t, out)), &env); err != nil {
 		t.Fatal(err)
 	}
 	byID := map[string]struct{ vuln, base bool }{}
-	for _, r := range results {
+	for _, r := range env.Findings {
 		byID[r.ProbeID] = struct{ vuln, base bool }{r.Vulnerable, r.Baselined}
 	}
 	if inj := byID["prompt-injection"]; !inj.vuln || !inj.base {
@@ -281,14 +283,16 @@ func TestRunOnlyScopesTheScan(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (only LLM02, which is safe here)", code)
 	}
-	var results []struct {
-		ProbeID string `json:"ProbeID"`
+	var env struct {
+		Findings []struct {
+			ProbeID string `json:"ProbeID"`
+		} `json:"findings"`
 	}
-	if err := json.Unmarshal([]byte(readFile(t, out)), &results); err != nil {
+	if err := json.Unmarshal([]byte(readFile(t, out)), &env); err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].ProbeID != "sensitive-disclosure" {
-		t.Errorf("only LLM02 should run just sensitive-disclosure, got %+v", results)
+	if len(env.Findings) != 1 || env.Findings[0].ProbeID != "sensitive-disclosure" {
+		t.Errorf("only LLM02 should run just sensitive-disclosure, got %+v", env.Findings)
 	}
 }
 

@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -292,9 +291,7 @@ func writeReport(w *os.File, format string, results []probe.Result, target strin
 	case "sarif":
 		return report.WriteSARIF(w, results, target)
 	case "json":
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(results)
+		return report.WriteJSON(w, results, target, version)
 	case "markdown", "md":
 		report.WriteMarkdown(w, results, target)
 		return nil

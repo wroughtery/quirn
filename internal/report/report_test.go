@@ -13,6 +13,52 @@ func vuln(id, owasp, sev string) probe.Result {
 	return probe.Result{ProbeID: id, OWASP: owasp, Name: id, Severity: sev, Vulnerable: true, Evidence: "[a] VULNERABLE: x"}
 }
 
+func TestWriteJSONEnvelope(t *testing.T) {
+	baselined := vuln("p2", "LLM02", "high")
+	baselined.Baselined = true
+	results := []probe.Result{
+		vuln("p1", "LLM01", "critical"),
+		baselined,
+		{ProbeID: "p3", OWASP: "LLM07", Name: "p3", Severity: "medium"},                  // ok
+		{ProbeID: "p4", OWASP: "LLM09", Name: "p4", Severity: "low", Inconclusive: true}, // inconclusive
+	}
+
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, results, "http://target", "9.9.9"); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+
+	var env Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("envelope is not valid JSON: %v", err)
+	}
+	if env.Tool != "quirn" || env.Version != "9.9.9" || env.Target != "http://target" {
+		t.Errorf("envelope metadata wrong: %+v", env)
+	}
+	want := Summary{Probes: 4, Vulnerable: 1, Baselined: 1, Inconclusive: 1, OK: 1}
+	if env.Summary != want {
+		t.Errorf("summary = %+v, want %+v", env.Summary, want)
+	}
+	if len(env.Findings) != 4 {
+		t.Errorf("findings len = %d, want 4", len(env.Findings))
+	}
+	// Categories must be mutually exclusive and account for every probe.
+	s := env.Summary
+	if s.Vulnerable+s.Baselined+s.Inconclusive+s.OK != s.Probes {
+		t.Errorf("summary categories do not sum to probes: %+v", s)
+	}
+}
+
+func TestWriteJSONEmptyFindingsIsArray(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, nil, "http://target", "1.0.0"); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	if !strings.Contains(buf.String(), `"findings": []`) {
+		t.Errorf("empty findings must marshal as [], got:\n%s", buf.String())
+	}
+}
+
 func TestGateFailed(t *testing.T) {
 	tests := []struct {
 		name    string
