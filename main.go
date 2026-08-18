@@ -37,6 +37,7 @@ Flags:
   --format string         Report format: sarif|json|text|markdown (default "text")
   --concurrency int       Max probes to run concurrently (default 4)
   --timeout duration      Overall scan deadline, e.g. 10m or 0 to disable (default 10m)
+  --max-retries int       Retries per model call on a transient error: 429/5xx/network (default 2)
   --only string           Run only these probes (comma-separated probe IDs or OWASP ids, e.g. LLM01,excessive-agency)
   --skip string           Skip these probes (comma-separated probe IDs or OWASP ids)
   --list-probes           Print the available probes and exit
@@ -97,6 +98,7 @@ func runScan(args []string) int {
 	format := fs.String("format", "text", "Report format: sarif|json|text|markdown")
 	concurrency := fs.Int("concurrency", runner.DefaultConcurrency, "Max probes to run concurrently")
 	timeout := fs.Duration("timeout", 10*time.Minute, "Overall scan deadline (0 disables)")
+	maxRetries := fs.Int("max-retries", 2, "Retries per model call on a transient error (429/5xx/network)")
 	only := fs.String("only", "", "Run only these probes (comma-separated probe IDs or OWASP ids)")
 	skip := fs.String("skip", "", "Skip these probes (comma-separated probe IDs or OWASP ids)")
 	listProbes := fs.Bool("list-probes", false, "Print the available probes and exit")
@@ -178,6 +180,9 @@ func runScan(args []string) int {
 	defer closeOut()
 
 	client := llm.NewClient(*target, apiKey)
+	if *maxRetries >= 0 {
+		client.MaxRetries = *maxRetries
+	}
 
 	cfg := probe.Config{
 		Target:     *target,

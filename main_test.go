@@ -128,7 +128,7 @@ func TestRunGatePassesWhenSafe(t *testing.T) {
 func TestRunAllInconclusiveFails(t *testing.T) {
 	url, _ := scriptedServer(t, nil, true) // every request 500s
 	out := filepath.Join(t.TempDir(), "r.md")
-	code := run([]string{"scan", "--target", url, "--format", "markdown", "--fail-on", "high", "--out", out})
+	code := run([]string{"scan", "--target", url, "--format", "markdown", "--fail-on", "high", "--max-retries", "0", "--out", out})
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (a scan that reached no verdict must not pass)", code)
 	}

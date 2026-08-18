@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"quirn/internal/llm"
 )
@@ -64,7 +65,9 @@ func newJudgeServer(t *testing.T, content string, status int) *llm.Client {
 		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":`+string(b)+`}}]}`)
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(srv.URL, "")
+	c := llm.NewClient(srv.URL, "")
+	c.BackoffBase = time.Millisecond // negligible retry backoff in tests
+	return c
 }
 
 func TestScoreVulnerable(t *testing.T) {

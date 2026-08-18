@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"quirn/internal/llm"
 )
@@ -57,7 +58,9 @@ func (m scriptedModel) client(t *testing.T) *llm.Client {
 		writeContent(w, "VERDICT: "+verdict+"\nscripted")
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(srv.URL, "")
+	c := llm.NewClient(srv.URL, "")
+	c.BackoffBase = time.Millisecond // keep the retry backoff negligible in tests
+	return c
 }
 
 func writeContent(w http.ResponseWriter, content string) {
