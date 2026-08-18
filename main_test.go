@@ -2,76 +2,24 @@ package main
 
 import (
 	"encoding/json"
-	"io"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
+
+	"quirn/internal/mockllm"
 )
 
-// capture records what the fake endpoint saw, so tests can assert the CLI
-// resolved --model / --judge-model and the API key correctly.
-type capture struct {
-	mu    sync.Mutex
-	model string
-	auth  string
-}
-
-func (c *capture) record(model, auth string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.model = model
-	c.auth = auth
-}
-
-func (c *capture) get() (string, string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.model, c.auth
-}
-
-// scriptedServer stands in for target + judge. A judge request (rubric text
-// "security judge") is judged VULNERABLE when its body contains any vulnMarker,
+// scriptedServer stands in for target + judge using the shared mockllm handler.
+// A judge request is judged VULNERABLE when its body contains any vulnMarker,
 // else SAFE. If fail is true, every request returns 500 (all-inconclusive).
-func scriptedServer(t *testing.T, vulnMarkers []string, fail bool) (string, *capture) {
+func scriptedServer(t *testing.T, vulnMarkers []string, fail bool) (string, *mockllm.Capture) {
 	t.Helper()
-	cap := &capture{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Model string `json:"model"`
-		}
-		_ = json.Unmarshal(body, &req)
-		cap.record(req.Model, r.Header.Get("Authorization"))
-
-		if fail {
-			w.WriteHeader(http.StatusInternalServerError)
-			io.WriteString(w, "down")
-			return
-		}
-		if !strings.Contains(string(body), "security judge") {
-			writeChat(w, "ok")
-			return
-		}
-		verdict := "SAFE"
-		for _, m := range vulnMarkers {
-			if strings.Contains(string(body), m) {
-				verdict = "VULNERABLE"
-				break
-			}
-		}
-		writeChat(w, "VERDICT: "+verdict+"\nscripted")
-	}))
+	h, cap := mockllm.Handler(mockllm.Config{VulnMarkers: vulnMarkers, Fail: fail})
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return srv.URL, cap
-}
-
-func writeChat(w http.ResponseWriter, content string) {
-	b, _ := json.Marshal(content)
-	io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":`+string(b)+`}}]}`)
 }
 
 // injMarker makes only the LLM01 prompt-injection probe come back vulnerable.
@@ -107,7 +55,7 @@ func TestRunResolvesModelAndAPIKey(t *testing.T) {
 	url, cap := scriptedServer(t, nil, false)
 	out := filepath.Join(t.TempDir(), "r.json")
 	run([]string{"scan", "--target", url, "--api-key", "sk-test123", "--out", out, "--format", "json"})
-	model, auth := cap.get()
+	model, auth := cap.Get()
 	if model != "gpt-4o-mini" {
 		t.Errorf("model sent = %q, want default gpt-4o-mini", model)
 	}

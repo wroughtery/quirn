@@ -59,6 +59,24 @@ No tagged release exists yet, so the action ([`action.yml`](action.yml)) builds 
 
 See [`.github/workflows/quirn-example.yml`](.github/workflows/quirn-example.yml) for a full example that uploads the SARIF report to the GitHub Security tab.
 
+## Development
+
+Quirn dogfoods itself. `cmd/mockllm` is a deterministic OpenAI-compatible target (no key, no network) that makes a known subset of probes come back vulnerable, so a full scan can be run and every report format eyeballed end-to-end.
+
+```bash
+scripts/dev.sh          # bash / CI
+pwsh scripts/dev.ps1    # Windows
+```
+
+Either script runs `go build` / `go vet` / `go test -cover`, then starts `mockllm` and prints the `text`, `json`, `markdown`, and `sarif` reports plus `--list-probes` against it. Run it after any change to see real behavior, not just unit results. To drive the mock by hand:
+
+```bash
+go run ./cmd/mockllm 127.0.0.1:8749 &          # --markers=... to pick which probes fire; --fail for all-inconclusive
+go run . scan --target http://127.0.0.1:8749 --api-key sk-dev --format json
+```
+
+The mock handler (`internal/mockllm`) is the same one the CLI test suite runs against, so the loop you see locally is the loop CI gates on.
+
 ## Positioning & roadmap
 
 - **Wedge (v0):** the CLI + GitHub Action above. Runs locally, no server, no DB.
