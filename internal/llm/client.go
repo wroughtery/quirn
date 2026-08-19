@@ -26,10 +26,17 @@ type Message struct {
 // enormous body must not be able to OOM the process.
 const maxResponseBytes = 8 << 20 // 8 MiB
 
+// DefaultRequestTimeout is the per-call HTTP timeout NewClient applies. It is
+// generous because quirn is commonly pointed at a local model (Ollama,
+// llama.cpp, LM Studio) whose first, cold, or "thinking" responses can take far
+// longer than a hosted API's — a too-short timeout there turns a working scan
+// into a wall of false inconclusives. Override with Client.SetRequestTimeout.
+const DefaultRequestTimeout = 120 * time.Second
+
 // defaultHTTPClient is used when a Client is constructed without one (e.g. a
 // struct literal). It is shared and read-only, so concurrent probes can use it
 // without a data race.
-var defaultHTTPClient = &http.Client{Timeout: 60 * time.Second}
+var defaultHTTPClient = &http.Client{Timeout: DefaultRequestTimeout}
 
 // Retry defaults. A transient 429/5xx or network blip is common against real
 // endpoints; retrying keeps it from turning into a false "inconclusive" (which,
@@ -60,11 +67,28 @@ func NewClient(baseURL, apiKey string) *Client {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		APIKey:  apiKey,
 		HTTPClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: DefaultRequestTimeout,
 		},
 		MaxRetries:  defaultMaxRetries,
 		BackoffBase: defaultBackoffBase,
 	}
+}
+
+// SetRequestTimeout sets the per-call HTTP timeout. A value <= 0 disables the
+// timeout entirely (relying only on the caller's context deadline), which is
+// useful for a very slow local model. Call it during setup, before the client
+// is shared across probe goroutines.
+func (c *Client) SetRequestTimeout(d time.Duration) {
+	if c == nil {
+		return
+	}
+	if c.HTTPClient == nil {
+		c.HTTPClient = &http.Client{}
+	}
+	if d < 0 {
+		d = 0
+	}
+	c.HTTPClient.Timeout = d
 }
 
 type chatRequest struct {

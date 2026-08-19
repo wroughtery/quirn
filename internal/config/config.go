@@ -39,6 +39,7 @@ type File struct {
 	Concurrency        *int     `json:"concurrency"`
 	Timeout            string   `json:"timeout"`
 	MaxRetries         *int     `json:"max_retries"`
+	RequestTimeout     string   `json:"request_timeout"`
 	Only               []string `json:"only"`
 	Skip               []string `json:"skip"`
 	Baseline           string   `json:"baseline"`
@@ -114,6 +115,11 @@ func (f *File) validate() error {
 			return fmt.Errorf("timeout %q is not a valid duration (e.g. 10m): %w", f.Timeout, err)
 		}
 	}
+	if f.RequestTimeout != "" {
+		if _, err := time.ParseDuration(f.RequestTimeout); err != nil {
+			return fmt.Errorf("request_timeout %q is not a valid duration (e.g. 2m): %w", f.RequestTimeout, err)
+		}
+	}
 	if f.Concurrency != nil && *f.Concurrency < 1 {
 		return fmt.Errorf("concurrency %d must be >= 1", *f.Concurrency)
 	}
@@ -158,5 +164,15 @@ func (f *File) TimeoutDuration() (time.Duration, bool) {
 		return 0, false
 	}
 	d, _ := time.ParseDuration(f.Timeout)
+	return d, true
+}
+
+// RequestTimeoutDuration returns the parsed per-call request timeout, or
+// (0, false) when unset. Only valid after a successful Load.
+func (f *File) RequestTimeoutDuration() (time.Duration, bool) {
+	if f.RequestTimeout == "" {
+		return 0, false
+	}
+	d, _ := time.ParseDuration(f.RequestTimeout)
 	return d, true
 }

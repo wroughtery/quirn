@@ -263,3 +263,29 @@ func TestChatConcurrentStructLiteralClient(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestSetRequestTimeout(t *testing.T) {
+	c := NewClient("http://x", "")
+	if c.HTTPClient.Timeout != DefaultRequestTimeout {
+		t.Errorf("default timeout = %v, want %v", c.HTTPClient.Timeout, DefaultRequestTimeout)
+	}
+	c.SetRequestTimeout(5 * time.Minute)
+	if c.HTTPClient.Timeout != 5*time.Minute {
+		t.Errorf("timeout = %v, want 5m", c.HTTPClient.Timeout)
+	}
+	// Zero and negative both mean "no timeout" (0).
+	c.SetRequestTimeout(0)
+	if c.HTTPClient.Timeout != 0 {
+		t.Errorf("timeout = %v, want 0 (disabled)", c.HTTPClient.Timeout)
+	}
+	c.SetRequestTimeout(-1)
+	if c.HTTPClient.Timeout != 0 {
+		t.Errorf("negative timeout = %v, want 0 (disabled)", c.HTTPClient.Timeout)
+	}
+	// Safe on a struct-literal client with a nil HTTPClient.
+	lit := &Client{BaseURL: "http://x"}
+	lit.SetRequestTimeout(time.Second)
+	if lit.HTTPClient == nil || lit.HTTPClient.Timeout != time.Second {
+		t.Errorf("SetRequestTimeout must create a client on nil HTTPClient")
+	}
+}

@@ -26,7 +26,7 @@ export QUIRN_API_KEY=sk-...
 ./quirn scan --target https://api.openai.com --model gpt-4o-mini --fail-on high --format sarif --out quirn.sarif
 ```
 
-`quirn scan --target <url>` is the only required flag; see `quirn help` for the full flag list (`--model`, `--judge-model`, `--fail-on`, `--fail-on-inconclusive`, `--format`, `--concurrency`, `--timeout`, `--max-retries`, `--only`, `--skip`, `--list-probes`, `--baseline`, `--write-baseline`, `--out`). Transient model errors (HTTP 429/5xx or network blips) are retried with backoff (`--max-retries`, default 2, honoring `Retry-After`) so a rate limit doesn't become a false inconclusive. `--format` accepts `text` (default), `json`, `sarif`, or `markdown` (a PR-comment scorecard). The `json` report is a deterministic envelope — `{tool, version, target, summary{probes,vulnerable,baselined,inconclusive,ok}, findings[]}`, no timestamp — so identical scans diff cleanly and downstream tooling gets pre-computed counts. `quirn version` prints the build version.
+`quirn scan --target <url>` is the only required flag; see `quirn help` for the full flag list (`--model`, `--judge-model`, `--fail-on`, `--fail-on-inconclusive`, `--format`, `--concurrency`, `--timeout`, `--max-retries`, `--request-timeout`, `--only`, `--skip`, `--list-probes`, `--baseline`, `--write-baseline`, `--out`, `--config`). Transient model errors (HTTP 429/5xx or network blips) are retried with backoff (`--max-retries`, default 2, honoring `Retry-After`) so a rate limit doesn't become a false inconclusive. Each model call has a per-request timeout (`--request-timeout`, default 2m) separate from the overall scan deadline — **raise it for a slow local model** whose first/"thinking" responses can take minutes, e.g. `--request-timeout 5m`, or `0` to disable it and rely only on `--timeout`. `--format` accepts `text` (default), `json`, `sarif`, or `markdown` (a PR-comment scorecard). The `json` report is a deterministic envelope — `{tool, version, target, summary{probes,vulnerable,baselined,inconclusive,ok}, findings[]}`, no timestamp — so identical scans diff cleanly and downstream tooling gets pre-computed counts. `quirn version` prints the build version.
 
 **Exit codes:** `0` clean, `1` a finding at or above `--fail-on` (or the scan reached no verdict), `2` a usage error. Crucially the gate is **fail-closed**: if every probe is inconclusive — a wrong key, an unreachable target, a blown `--timeout` — quirn exits non-zero instead of reporting a false green, so a misconfigured CI run can't masquerade as a pass. Add `--fail-on-inconclusive` to also fail when *any* probe couldn't be scored.
 
@@ -82,7 +82,7 @@ Pass `--config quirn.json` to supply defaults for any scan flag plus per-probe s
 }
 ```
 
-A custom `id` that collides with a built-in, a bad severity, or an attack missing its `goal`/`payload` is rejected up front. See [`quirn.example.json`](quirn.example.json) for the full set of keys (`target`, `model`, `judge_model`, `fail_on`, `fail_on_inconclusive`, `format`, `concurrency`, `timeout`, `max_retries`, `only`, `skip`, `baseline`, `severities`, `custom_probes`).
+A custom `id` that collides with a built-in, a bad severity, or an attack missing its `goal`/`payload` is rejected up front. See [`quirn.example.json`](quirn.example.json) for the full set of keys (`target`, `model`, `judge_model`, `fail_on`, `fail_on_inconclusive`, `format`, `concurrency`, `timeout`, `max_retries`, `request_timeout`, `only`, `skip`, `baseline`, `severities`, `custom_probes`).
 
 ### GitHub Action
 
