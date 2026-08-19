@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>quirn live</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232c; --border: #2b333d;
+    --fg: #e6edf3; --muted: #8b97a5; --accent: #6ea8fe;
+    --vuln: #f0546a; --safe: #3fb950; --inconc: #d6a641; --pending: #6b7684;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--panel);
+    border-bottom: 1px solid var(--border); padding: 12px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .5px; }
+  header h1 .dot { color: var(--accent); }
+  .status { font-size: 12px; color: var(--muted); }
+  .status.live::before { content: "● "; color: var(--vuln); }
+  .status.done::before { content: "■ "; color: var(--safe); }
+  .counts { margin-left: auto; display: flex; gap: 14px; font-size: 12px; }
+  .counts b { font-variant-numeric: tabular-nums; }
+  .c-vuln b { color: var(--vuln); } .c-safe b { color: var(--safe); }
+  .c-inconc b { color: var(--inconc); }
+  main { padding: 18px 20px; display: grid; gap: 14px; max-width: 1100px; margin: 0 auto; }
+  .probe {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; overflow: hidden;
+  }
+  .probe > .head {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: var(--panel2); border-bottom: 1px solid var(--border);
+  }
+  .owasp {
+    font: 600 11px var(--mono); color: var(--accent);
+    background: rgba(110,168,254,.12); padding: 2px 7px; border-radius: 5px;
+  }
+  .pname { font-weight: 600; } .pid { color: var(--muted); font: 12px var(--mono); }
+  .badge {
+    margin-left: auto; font: 600 11px var(--mono); text-transform: uppercase;
+    padding: 2px 9px; border-radius: 20px; letter-spacing: .4px;
+  }
+  .b-pending { color: var(--pending); border: 1px solid var(--pending); }
+  .b-vulnerable { color: #fff; background: var(--vuln); }
+  .b-safe { color: #fff; background: var(--safe); }
+  .b-inconclusive { color: #1a1200; background: var(--inconc); }
+  .attacks { display: grid; }
+  .attack { border-top: 1px solid var(--border); padding: 10px 14px; }
+  .attack:first-child { border-top: none; }
+  .attack > .row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .aname { font: 600 12px var(--mono); }
+  .lat { color: var(--muted); font: 11px var(--mono); }
+  .vbadge { margin-left: auto; font: 600 11px var(--mono); text-transform: uppercase; }
+  .v-vulnerable { color: var(--vuln); } .v-safe { color: var(--safe); }
+  .v-inconclusive { color: var(--inconc); } .v-pending { color: var(--pending); }
+  .caret { color: var(--muted); transition: transform .15s; }
+  .attack.open .caret { transform: rotate(90deg); }
+  .detail { display: none; margin-top: 10px; }
+  .attack.open .detail { display: grid; gap: 8px; }
+  .field { display: grid; gap: 3px; }
+  .field label {
+    font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted);
+  }
+  .field pre {
+    margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; font: 12px/1.5 var(--mono); white-space: pre-wrap;
+    word-break: break-word; max-height: 260px; overflow: auto;
+  }
+  .field pre.reason { color: var(--fg); background: transparent; border: none; padding: 2px 0; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot">◆</span> quirn <span style="color:var(--muted);font-weight:400">live</span></h1>
+  <span class="status live" id="status">connecting…</span>
+  <div class="counts">
+    <span class="c-vuln">vulnerable <b id="n-vuln">0</b></span>
+    <span class="c-safe">safe <b id="n-safe">0</b></span>
+    <span class="c-inconc">inconclusive <b id="n-inconc">0</b></span>
+  </div>
+</header>
+<main id="main"><div class="empty" id="empty">Waiting for the scan to start…</div></main>
+
+<script>
+(function () {
+  const main = document.getElementById("main");
+  const empty = document.getElementById("empty");
+  const statusEl = document.getElementById("status");
+  const probes = new Map();   // probeId -> {el, attacks: Map}
+  const seen = new Set();     // seq de-dup across reconnects
+  const counts = { vulnerable: 0, safe: 0, inconclusive: 0 };
+
+  function esc(s) { return (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+  function ensureProbe(e) {
+    let p = probes.get(e.probeId);
+    if (p) return p;
+    if (empty) empty.remove();
+    const el = document.createElement("section");
+    el.className = "probe";
+    el.innerHTML =
+      '<div class="head"><span class="owasp">' + esc(e.owasp || "") + '</span>' +
+      '<span class="pname">' + esc(e.name || e.probeId) + '</span>' +
+      '<span class="pid">' + esc(e.probeId) + '</span>' +
+      '<span class="badge b-pending" data-badge>running</span></div>' +
+      '<div class="attacks" data-attacks></div>';
+    main.appendChild(el);
+    p = { el, badge: el.querySelector("[data-badge]"), attacks: new Map(), attacksEl: el.querySelector("[data-attacks]") };
+    probes.set(e.probeId, p);
+    return p;
+  }
+
+  function ensureAttack(p, name) {
+    let a = p.attacks.get(name);
+    if (a) return a;
+    const el = document.createElement("div");
+    el.className = "attack";
+    el.innerHTML =
+      '<div class="row"><span class="caret">▸</span>' +
+      '<span class="aname">' + esc(name) + '</span>' +
+      '<span class="lat" data-lat></span>' +
+      '<span class="vbadge v-pending" data-v>pending</span></div>' +
+      '<div class="detail">' +
+      '<div class="field"><label>goal</label><pre class="reason" data-goal></pre></div>' +
+      '<div class="field"><label>payload sent</label><pre data-payload></pre></div>' +
+      '<div class="field"><label>model reply</label><pre data-reply></pre></div>' +
+      '<div class="field"><label>judge</label><pre class="reason" data-reason></pre></div>' +
+      '</div>';
+    el.querySelector(".row").addEventListener("click", () => el.classList.toggle("open"));
+    p.attacksEl.appendChild(el);
+    a = { el };
+    p.attacks.set(name, a);
+    return a;
+  }
+
+  function setVerdict(node, verdict) {
+    node.className = "vbadge v-" + verdict;
+    node.textContent = verdict;
+  }
+
+  function apply(e) {
+    switch (e.kind) {
+      case "probe_start": ensureProbe(e); break;
+      case "attack_start": {
+        const a = ensureAttack(ensureProbe(e), e.attack);
+        a.el.querySelector("[data-goal]").textContent = e.goal || "";
+        a.el.querySelector("[data-payload]").textContent = e.payload || "";
+        break;
+      }
+      case "attack_response": {
+        const a = ensureAttack(ensureProbe(e), e.attack);
+        if (e.latencyMs) a.el.querySelector("[data-lat]").textContent = (e.latencyMs / 1000).toFixed(1) + "s";
+        a.el.querySelector("[data-reply]").textContent = e.error ? ("[error] " + e.error) : (e.reply || "");
+        break;
+      }
+      case "attack_verdict": {
+        const a = ensureAttack(ensureProbe(e), e.attack);
+        setVerdict(a.el.querySelector("[data-v]"), e.verdict);
+        a.el.querySelector("[data-reason]").textContent = e.reason || "";
+        break;
+      }
+      case "probe_finish": {
+        const p = ensureProbe(e);
+        p.badge.className = "badge b-" + e.verdict;
+        p.badge.textContent = e.verdict;
+        if (counts[e.verdict] !== undefined) { counts[e.verdict]++; refreshCounts(); }
+        break;
+      }
+      case "scan_finish":
+        statusEl.className = "status done";
+        statusEl.textContent = "scan complete";
+        break;
+    }
+  }
+
+  function refreshCounts() {
+    document.getElementById("n-vuln").textContent = counts.vulnerable;
+    document.getElementById("n-safe").textContent = counts.safe;
+    document.getElementById("n-inconc").textContent = counts.inconclusive;
+  }
+
+  const src = new EventSource("/events");
+  src.onopen = () => { if (statusEl.className.indexOf("done") < 0) { statusEl.className = "status live"; statusEl.textContent = "scanning…"; } };
+  src.onerror = () => { if (statusEl.className.indexOf("done") < 0) statusEl.textContent = "reconnecting…"; };
+  src.onmessage = (m) => {
+    let e; try { e = JSON.parse(m.data); } catch { return; }
+    if (e.seq && seen.has(e.seq)) return;
+    if (e.seq) seen.add(e.seq);
+    apply(e);
+  };
+})();
+</script>
+</body>
+</html>

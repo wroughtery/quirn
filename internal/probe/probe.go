@@ -5,6 +5,7 @@ package probe
 import (
 	"context"
 
+	"quirn/internal/live"
 	"quirn/internal/llm"
 )
 
@@ -18,6 +19,11 @@ type Config struct {
 	// JudgeModel is the model name used to judge whether an attack
 	// succeeded. May be empty if judging is not yet implemented for a probe.
 	JudgeModel string
+	// Observer, when non-nil, receives live lifecycle events as the probe
+	// runs (payload sent, target reply, judge verdict). It is purely
+	// observational: it never affects the Result or report output. Nil in the
+	// common case, which preserves byte-identical reports.
+	Observer live.Observer
 }
 
 // Result is the outcome of running a single probe against a target.

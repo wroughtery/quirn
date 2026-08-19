@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"time"
 
 	"quirn/internal/baseline"
 	"quirn/internal/config"
+	"quirn/internal/live"
 	"quirn/internal/llm"
 	"quirn/internal/probe"
 	"quirn/internal/report"
@@ -47,6 +49,9 @@ Flags:
   --write-baseline        Snapshot the current findings to the --baseline path and exit 0 (accept them)
   --out string            Path to write the report to (default: stdout)
   --config string         JSON config file supplying flag defaults + per-probe severity overrides (flags still win)
+  --live                  Stream each attack's payload, reply, and verdict to stderr as the scan runs
+  --dashboard             Serve a live web dashboard of the scan; stays up after the scan until Ctrl+C
+  --dashboard-addr string Address for --dashboard to bind (default "127.0.0.1:8899"; keep on loopback)
 
 Exit codes: 0 = clean, 1 = findings gated / scan reached no verdict, 2 = usage error.
 
@@ -110,6 +115,9 @@ func runScan(args []string) int {
 	writeBaseline := fs.Bool("write-baseline", false, "Snapshot current findings to --baseline and exit 0")
 	out := fs.String("out", "", "Path to write the report to (default: stdout)")
 	configPath := fs.String("config", "", "Path to a JSON config file supplying flag defaults and per-probe severity overrides")
+	liveConsole := fs.Bool("live", false, "Stream each attack's payload, reply, and verdict to stderr as the scan runs")
+	dashboard := fs.Bool("dashboard", false, "Serve a live web dashboard of the scan (payload/reply/verdict per attack)")
+	dashboardAddr := fs.String("dashboard-addr", "127.0.0.1:8899", "Address for --dashboard to bind (keep on loopback: it exposes captured payloads and replies)")
 
 	if err := fs.Parse(args); err != nil {
 		// flag already printed its own error/usage.
@@ -286,6 +294,30 @@ func runScan(args []string) int {
 		JudgeModel: *judgeModel,
 	}
 
+	// Optional live views. Both are observational and off by default, so a
+	// normal run is unchanged and reports stay byte-identical. The console
+	// streams to stderr (never stdout, where a report may go); the dashboard
+	// serves on loopback so captured payloads/replies never leave the host.
+	var consoleSink live.Observer
+	if *liveConsole {
+		consoleSink = live.NewConsole(os.Stderr)
+	}
+	var hub *live.Hub
+	if *dashboard {
+		hub = live.NewHub()
+		url, err := hub.ListenAndServe(*dashboardAddr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "quirn: live dashboard at %s\n", url)
+	}
+	if hub != nil {
+		cfg.Observer = live.Multi(consoleSink, hub)
+	} else {
+		cfg.Observer = consoleSink
+	}
+
 	ctx := context.Background()
 	if *timeout > 0 {
 		var cancel context.CancelFunc
@@ -313,6 +345,21 @@ func runScan(args []string) int {
 		}
 	}
 
+	live.Emit(cfg.Observer, live.Event{Kind: live.KindScanFinish})
+
+	// finish keeps a live dashboard served after the scan ends: it blocks until
+	// the user interrupts, then returns the exit code. Without a dashboard it
+	// returns immediately, so CI behavior is unchanged.
+	finish := func(code int) int {
+		if hub != nil {
+			fmt.Fprintf(os.Stderr, "quirn: scan finished (exit %d) — dashboard still live at http://%s, press Ctrl+C to exit\n", code, *dashboardAddr)
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, os.Interrupt)
+			<-sig
+		}
+		return code
+	}
+
 	if err := writeReport(outWriter, *format, results, *target); err != nil {
 		fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
 		return 1
@@ -322,8 +369,8 @@ func runScan(args []string) int {
 	// unreachable target, timeout). It must NOT look like a clean pass, and it
 	// must not snapshot an empty baseline, so fail before either.
 	if report.AllInconclusive(results) {
-		fmt.Fprintln(os.Stderr, "quirn: every probe was inconclusive — the target could not be reached or scored (check --target, --api-key, --timeout); failing the run")
-		return 1
+		fmt.Fprintln(os.Stderr, "quirn: every probe was inconclusive — the target was unreachable or every call timed out (check --target/--api-key, raise --request-timeout, or lower --concurrency for a slow local model); failing the run")
+		return finish(1)
 	}
 
 	// --write-baseline snapshots the current findings and accepts them: write
@@ -334,17 +381,17 @@ func runScan(args []string) int {
 			return 1
 		}
 		fmt.Fprintf(os.Stderr, "quirn: wrote baseline %q\n", *baselinePath)
-		return 0
+		return finish(0)
 	}
 
 	if report.GateFailed(results, *failOn) {
-		return 1
+		return finish(1)
 	}
 	if *failOnInconclusive && report.AnyInconclusive(results) {
 		fmt.Fprintln(os.Stderr, "quirn: --fail-on-inconclusive set and at least one probe was inconclusive; failing the run")
-		return 1
+		return finish(1)
 	}
-	return 0
+	return finish(0)
 }
 
 // splitList splits a comma-separated flag value into trimmed, non-empty tokens.

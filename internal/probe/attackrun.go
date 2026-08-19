@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"quirn/internal/judge"
+	"quirn/internal/live"
 	"quirn/internal/llm"
 )
 
@@ -39,6 +41,11 @@ func newResult(p Probe) Result {
 // confirmed vulnerability always takes precedence over inconclusive attempts.
 func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result, attacks []attack) Result {
 	j := judge.New(client, cfg.JudgeModel)
+	obs := cfg.Observer
+
+	live.Emit(obs, live.Event{
+		Kind: live.KindProbeStart, ProbeID: base.ProbeID, OWASP: base.OWASP, Name: base.Name,
+	})
 
 	var evidence []string
 	sawInconclusive := false
@@ -50,22 +57,40 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 		}
 		messages = append(messages, llm.Message{Role: "user", Content: atk.payload})
 
+		live.Emit(obs, live.Event{
+			Kind: live.KindAttackStart, ProbeID: base.ProbeID, Attack: atk.name,
+			Goal: atk.goal, System: atk.system, Payload: atk.payload,
+		})
+
+		start := time.Now()
 		reply, err := client.Chat(ctx, cfg.Model, messages)
+		latencyMS := time.Since(start).Milliseconds()
 		if err != nil {
+			live.Emit(obs, live.Event{
+				Kind: live.KindAttackResponse, ProbeID: base.ProbeID, Attack: atk.name,
+				Error: err.Error(), LatencyMS: latencyMS,
+			})
 			sawInconclusive = true
 			evidence = append(evidence, fmt.Sprintf("[%s] target request failed: %v", atk.name, err))
 			continue
 		}
+		live.Emit(obs, live.Event{
+			Kind: live.KindAttackResponse, ProbeID: base.ProbeID, Attack: atk.name,
+			Reply: reply, LatencyMS: latencyMS,
+		})
 
 		v := j.Score(ctx, atk.goal, atk.payload, reply)
 		switch {
 		case v.Vulnerable:
+			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "vulnerable", Reason: v.Reason})
 			base.Vulnerable = true
 			evidence = append(evidence, fmt.Sprintf("[%s] VULNERABLE: %s", atk.name, v.Reason))
 		case v.Inconclusive:
+			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "inconclusive", Reason: v.Reason})
 			sawInconclusive = true
 			evidence = append(evidence, fmt.Sprintf("[%s] inconclusive: %s", atk.name, v.Reason))
 		default:
+			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "safe", Reason: v.Reason})
 			evidence = append(evidence, fmt.Sprintf("[%s] safe: %s", atk.name, v.Reason))
 		}
 	}
@@ -77,5 +102,22 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 	}
 	base.Evidence = strings.Join(evidence, "\n")
 
+	live.Emit(obs, live.Event{
+		Kind: live.KindProbeFinish, ProbeID: base.ProbeID, OWASP: base.OWASP,
+		Name: base.Name, Verdict: verdictLabel(base),
+	})
+
 	return base
+}
+
+// verdictLabel collapses a finished Result into the live-view verdict string.
+func verdictLabel(r Result) string {
+	switch {
+	case r.Vulnerable:
+		return "vulnerable"
+	case r.Inconclusive:
+		return "inconclusive"
+	default:
+		return "safe"
+	}
 }
