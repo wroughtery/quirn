@@ -45,6 +45,12 @@ func (c *Console) Handle(e Event) {
 		fmt.Fprintf(c.w, "%s %s %s: %s\n", verdictGlyph(e.Verdict), e.OWASP, e.ProbeID, e.Verdict)
 	case KindScanFinish:
 		fmt.Fprintf(c.w, "\n■ scan complete\n")
+	case KindScanPaused:
+		fmt.Fprintf(c.w, "\n‖ scan paused\n")
+	case KindScanResumed:
+		fmt.Fprintf(c.w, "\n▸ scan resumed\n")
+	case KindScanStopped:
+		fmt.Fprintf(c.w, "\n■ scan stopped by user\n")
 	}
 }
 

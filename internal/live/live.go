@@ -19,6 +19,11 @@ const (
 	KindAttackVerdict  Kind = "attack_verdict"
 	KindProbeFinish    Kind = "probe_finish"
 	KindScanFinish     Kind = "scan_finish"
+	// Control-state changes, driven by the dashboard's pause/resume/stop
+	// buttons. Observational, like every other event.
+	KindScanPaused  Kind = "scan_paused"
+	KindScanResumed Kind = "scan_resumed"
+	KindScanStopped Kind = "scan_stopped"
 )
 
 // Event is a single lifecycle notification. It is a flat tagged struct rather

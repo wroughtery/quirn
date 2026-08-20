@@ -24,6 +24,11 @@ type Config struct {
 	// observational: it never affects the Result or report output. Nil in the
 	// common case, which preserves byte-identical reports.
 	Observer live.Observer
+	// Gate, when non-nil, is consulted before each attack so the dashboard can
+	// pause the scan. Nil in the common case (no pausing). A gated scan that is
+	// stopped unwinds via the context; pausing only delays, it never changes a
+	// Result, so reports stay byte-identical.
+	Gate live.Gate
 }
 
 // Result is the outcome of running a single probe against a target.

@@ -92,23 +92,23 @@ func TestProbeSafe(t *testing.T) {
 }
 
 // TestAllAttacksAreSent pins that every payload in the set actually runs: only
-// the role-override attack (keyed on "DAN") is scripted vulnerable, so the probe
-// can only come back Vulnerable if that third attack was sent. Truncating the
-// attack loop would make this fail.
+// the spoofed-policy-update attack (keyed on "DEVELOPER PATCH NOTE") is scripted
+// vulnerable, so the probe can only come back Vulnerable if that third attack
+// was sent. Truncating the attack loop would make this fail.
 func TestAllAttacksAreSent(t *testing.T) {
-	r := runInjection(t, scriptedModel{verdicts: map[string]string{"DAN": "VULNERABLE"}})
+	r := runInjection(t, scriptedModel{verdicts: map[string]string{"DEVELOPER PATCH NOTE": "VULNERABLE"}})
 	if !r.Vulnerable {
-		t.Fatalf("role-override (DAN) is the vulnerable attack; probe must have run it: %+v\nevidence:\n%s", r, r.Evidence)
+		t.Fatalf("spoofed-policy-update is the vulnerable attack; probe must have run it: %+v\nevidence:\n%s", r, r.Evidence)
 	}
 }
 
 // TestVulnerableWinsOverInconclusive exercises a genuinely mixed fold: the
-// direct-override target call fails (inconclusive) while role-override is judged
-// vulnerable. The invariant is Vulnerable && !Inconclusive.
+// payload-splitting target call fails (inconclusive) while spoofed-policy-update
+// is judged vulnerable. The invariant is Vulnerable && !Inconclusive.
 func TestVulnerableWinsOverInconclusive(t *testing.T) {
 	r := runInjection(t, scriptedModel{
-		failTargets: []string{"Ignore all previous instructions"}, // direct-override -> inconclusive
-		verdicts:    map[string]string{"DAN": "VULNERABLE"},       // role-override   -> vulnerable
+		failTargets: []string{"formatting drill"},                            // payload-splitting -> inconclusive
+		verdicts:    map[string]string{"DEVELOPER PATCH NOTE": "VULNERABLE"}, // spoofed-policy-update -> vulnerable
 	})
 	if !r.Vulnerable {
 		t.Fatalf("a confirmed vuln must win over inconclusive attempts: %+v", r)
@@ -125,7 +125,7 @@ func TestVulnerableWinsOverInconclusive(t *testing.T) {
 // not be scored -> Inconclusive.
 func TestInconclusiveWhenSomeFailAndRestSafe(t *testing.T) {
 	r := runInjection(t, scriptedModel{
-		failTargets: []string{"Ignore all previous instructions"}, // one inconclusive
+		failTargets: []string{"formatting drill"}, // one inconclusive
 		// others default SAFE
 	})
 	if r.Vulnerable {

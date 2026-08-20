@@ -190,6 +190,54 @@ func TestHandleEventsReplaysBacklogAsSSE(t *testing.T) {
 	}
 }
 
+func TestHandleControlDrivesController(t *testing.T) {
+	h := NewHub()
+
+	// No controller wired yet -> unavailable.
+	rec := httptest.NewRecorder()
+	h.handleControl(rec, httptest.NewRequest(http.MethodPost, "/control?action=pause", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 without controller, got %d", rec.Code)
+	}
+
+	ctrl := NewController(nil)
+	h.SetController(ctrl)
+
+	// GET is rejected.
+	rec = httptest.NewRecorder()
+	h.handleControl(rec, httptest.NewRequest(http.MethodGet, "/control?action=pause", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("want 405 for GET, got %d", rec.Code)
+	}
+
+	// Pause then resume drive the controller.
+	rec = httptest.NewRecorder()
+	h.handleControl(rec, httptest.NewRequest(http.MethodPost, "/control?action=pause", nil))
+	if rec.Code != http.StatusOK || !ctrl.Paused() {
+		t.Fatalf("pause failed: code=%d paused=%v", rec.Code, ctrl.Paused())
+	}
+	rec = httptest.NewRecorder()
+	h.handleControl(rec, httptest.NewRequest(http.MethodPost, "/control?action=resume", nil))
+	if rec.Code != http.StatusOK || ctrl.Paused() {
+		t.Errorf("resume failed: code=%d paused=%v", rec.Code, ctrl.Paused())
+	}
+
+	// Unknown action is a client error.
+	rec = httptest.NewRecorder()
+	h.handleControl(rec, httptest.NewRequest(http.MethodPost, "/control?action=frobnicate", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400 for unknown action, got %d", rec.Code)
+	}
+
+	// Each valid action broadcasts a state event.
+	h.mu.Lock()
+	n := len(h.buffer)
+	h.mu.Unlock()
+	if n < 2 {
+		t.Errorf("control actions should broadcast events, buffered %d", n)
+	}
+}
+
 func TestListenAndServeBindsLoopbackAndServes(t *testing.T) {
 	h := NewHub()
 	url, err := h.ListenAndServe("127.0.0.1:0")

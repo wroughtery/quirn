@@ -31,11 +31,22 @@ type Hub struct {
 	buffer  []Event
 	clients map[chan Event]struct{}
 	done    bool
+	// controller, when set, receives pause/resume/stop from the /control
+	// endpoint. Read under mu.
+	controller *Controller
 }
 
 // NewHub returns an empty Hub.
 func NewHub() *Hub {
 	return &Hub{clients: make(map[chan Event]struct{})}
+}
+
+// SetController wires the pause/resume/stop controller the dashboard's control
+// buttons drive. Call it before serving.
+func (h *Hub) SetController(c *Controller) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.controller = c
 }
 
 // Handle assigns the event a sequence number, stores it for replay, and
@@ -97,6 +108,7 @@ func (h *Hub) ListenAndServe(addr string) (string, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/events", h.handleEvents)
+	mux.HandleFunc("/control", h.handleControl)
 
 	srv := &http.Server{Handler: mux}
 	go srv.Serve(ln)
@@ -144,6 +156,44 @@ func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// handleControl applies a pause/resume/stop action from the dashboard buttons.
+// It broadcasts the resulting state change as an event so every connected
+// client (and the console) reflects it.
+func (h *Hub) handleControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	h.mu.Lock()
+	ctrl := h.controller
+	h.mu.Unlock()
+	if ctrl == nil {
+		http.Error(w, "scan not controllable", http.StatusServiceUnavailable)
+		return
+	}
+
+	action := r.URL.Query().Get("action")
+	var ev Kind
+	switch action {
+	case "pause":
+		ctrl.Pause()
+		ev = KindScanPaused
+	case "resume":
+		ctrl.Resume()
+		ev = KindScanResumed
+	case "stop":
+		ctrl.Stop()
+		ev = KindScanStopped
+	default:
+		http.Error(w, "unknown action (want pause|resume|stop)", http.StatusBadRequest)
+		return
+	}
+
+	h.Handle(Event{Kind: ev})
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"action":%q,"paused":%t}`, action, ctrl.Paused())
 }
 
 // writeSSE writes one Event as an SSE "data:" frame. A marshal error is skipped

@@ -294,6 +294,17 @@ func runScan(args []string) int {
 		JudgeModel: *judgeModel,
 	}
 
+	// A cancellable context underlies the scan so the dashboard's Stop button
+	// (and the optional --timeout) can end it; cancelling this parent propagates
+	// to the timeout child the scan actually runs under.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if *timeout > 0 {
+		var tcancel context.CancelFunc
+		ctx, tcancel = context.WithTimeout(ctx, *timeout)
+		defer tcancel()
+	}
+
 	// Optional live views. Both are observational and off by default, so a
 	// normal run is unchanged and reports stay byte-identical. The console
 	// streams to stderr (never stdout, where a report may go); the dashboard
@@ -305,6 +316,10 @@ func runScan(args []string) int {
 	var hub *live.Hub
 	if *dashboard {
 		hub = live.NewHub()
+		// Stop cancels the scan; Pause/Resume gate it between attacks.
+		controller := live.NewController(cancel)
+		hub.SetController(controller)
+		cfg.Gate = controller
 		url, err := hub.ListenAndServe(*dashboardAddr)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
@@ -316,13 +331,6 @@ func runScan(args []string) int {
 		cfg.Observer = live.Multi(consoleSink, hub)
 	} else {
 		cfg.Observer = consoleSink
-	}
-
-	ctx := context.Background()
-	if *timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, *timeout)
-		defer cancel()
 	}
 
 	results := runner.Run(ctx, client, cfg, probes, *concurrency)

@@ -51,6 +51,15 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 	sawInconclusive := false
 
 	for _, atk := range attacks {
+		// Honor a dashboard pause before starting the attack; a stop cancels the
+		// context, so GateWait returns an error and we unwind without a false
+		// "safe" for the attacks that never ran.
+		if err := live.GateWait(cfg.Gate, ctx); err != nil {
+			sawInconclusive = true
+			evidence = append(evidence, fmt.Sprintf("[%s] not run: scan %v", atk.name, err))
+			break
+		}
+
 		var messages []llm.Message
 		if atk.system != "" {
 			messages = append(messages, llm.Message{Role: "system", Content: atk.system})
