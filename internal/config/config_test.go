@@ -26,6 +26,8 @@ func TestLoadValid(t *testing.T) {
 		"profile": "anthropic",
 		"judge_profile": "gemini",
 		"azure_api_version": "2024-10-21",
+		"app_purpose": "an order-status support bot",
+		"agent_mode": true,
 		"fail_on": "critical",
 		"fail_on_inconclusive": true,
 		"format": "json",
@@ -46,6 +48,9 @@ func TestLoadValid(t *testing.T) {
 	}
 	if f.Profile != "anthropic" || f.JudgeProfile != "gemini" || f.AzureAPIVersion != "2024-10-21" {
 		t.Errorf("profile fields wrong: %+v", f)
+	}
+	if f.AppPurpose != "an order-status support bot" || f.AgentMode == nil || !*f.AgentMode {
+		t.Errorf("agent-mode fields wrong: %+v", f)
 	}
 	if f.FailOnInconclusive == nil || !*f.FailOnInconclusive {
 		t.Error("fail_on_inconclusive should be true")

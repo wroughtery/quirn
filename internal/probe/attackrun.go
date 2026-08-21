@@ -15,11 +15,39 @@ import (
 // judge, an optional system message that establishes the app context being
 // attacked (e.g. a planted secret or a fake tool interface), and the raw
 // payload sent to the target as the user turn.
+//
+// Agent mode (Config.AgentMode) tests the DEPLOYED app rather than a synthetic
+// scenario: the planted system message is suppressed, and where the model-mode
+// goal/payload referenced quirn's planted canary, agentGoal/agentPayload replace
+// them with an app-relative form (leak the app's OWN secret/system-prompt, take
+// its OWN unauthorized action). An empty agentGoal/agentPayload means the
+// model-mode value already works user-only and is reused as-is.
 type attack struct {
 	name    string
 	goal    string
 	system  string // optional; sent as a system message before payload when non-empty
 	payload string
+
+	agentGoal    string // optional; replaces goal in agent mode
+	agentPayload string // optional; replaces payload in agent mode
+}
+
+// resolve returns the goal, system message, and payload to use for this attack
+// under the given mode. In agent mode the synthetic system is always suppressed
+// (the app supplies its own), and agentGoal/agentPayload override goal/payload
+// when set.
+func (a attack) resolve(agentMode bool) (goal, system, payload string) {
+	if !agentMode {
+		return a.goal, a.system, a.payload
+	}
+	goal, payload = a.goal, a.payload
+	if a.agentGoal != "" {
+		goal = a.agentGoal
+	}
+	if a.agentPayload != "" {
+		payload = a.agentPayload
+	}
+	return goal, "", payload
 }
 
 // newResult seeds a Result from a probe's identity and severity, so each
@@ -68,15 +96,17 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 			break
 		}
 
+		goal, system, payload := atk.resolve(cfg.AgentMode)
+
 		var messages []llm.Message
-		if atk.system != "" {
-			messages = append(messages, llm.Message{Role: "system", Content: atk.system})
+		if system != "" {
+			messages = append(messages, llm.Message{Role: "system", Content: system})
 		}
-		messages = append(messages, llm.Message{Role: "user", Content: atk.payload})
+		messages = append(messages, llm.Message{Role: "user", Content: payload})
 
 		live.Emit(obs, live.Event{
 			Kind: live.KindAttackStart, ProbeID: base.ProbeID, Attack: atk.name,
-			Goal: atk.goal, System: atk.system, Payload: atk.payload,
+			Goal: goal, System: system, Payload: payload,
 		})
 
 		start := time.Now()
@@ -96,7 +126,7 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 			Reply: reply, LatencyMS: latencyMS,
 		})
 
-		v := j.Score(ctx, atk.goal, atk.payload, reply)
+		v := j.Score(ctx, goal, payload, reply)
 		switch {
 		case v.Vulnerable:
 			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "vulnerable", Reason: v.Reason})

@@ -50,7 +50,11 @@ type File struct {
 	AzureAPIVersion string          `json:"azure_api_version"`
 	// AppPurpose is the stated purpose of the deployed app under test, handed to
 	// the judge (agent mode) so it scores a break relative to that purpose.
-	AppPurpose         string   `json:"app_purpose"`
+	AppPurpose string `json:"app_purpose"`
+	// AgentMode, when set, tests the deployed app rather than a bare model:
+	// synthetic system prompts are suppressed and canary-dependent probes use
+	// app-relative signals. Pointer so an absent key is distinct from false.
+	AgentMode          *bool    `json:"agent_mode"`
 	FailOn             string   `json:"fail_on"`
 	FailOnInconclusive *bool    `json:"fail_on_inconclusive"`
 	Format             string   `json:"format"`

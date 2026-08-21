@@ -604,6 +604,41 @@ func TestRunJudgeKeyFromEnv(t *testing.T) {
 	}
 }
 
+// --agent-mode suppresses quirn's synthetic system prompt at the target, so a
+// probe that plants a system message in model mode sends none in agent mode.
+func TestRunAgentModeSuppressesSystem(t *testing.T) {
+	var mu sync.Mutex
+	targetSystemSeen := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		s := string(b)
+		if strings.Contains(s, "security judge") {
+			io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"VERDICT: SAFE\nok"}}]}`)
+			return
+		}
+		if strings.Contains(s, `"role":"system"`) {
+			mu.Lock()
+			targetSystemSeen = true
+			mu.Unlock()
+		}
+		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`)
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "r.json")
+	// LLM01 plants a synthetic system prompt in model mode; agent mode drops it.
+	code := run([]string{"scan", "--target", srv.URL, "--agent-mode",
+		"--app-purpose", "a demo app", "--only", "LLM01", "--format", "json", "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if targetSystemSeen {
+		t.Error("agent mode sent a system message to the target; it must be suppressed")
+	}
+}
+
 // --profile anthropic makes quirn speak the Anthropic shape end-to-end: requests
 // hit /v1/messages with the x-api-key header, not the OpenAI path/Bearer.
 func TestRunProfileAnthropicRoutes(t *testing.T) {

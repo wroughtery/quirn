@@ -59,7 +59,19 @@ unset) → docs.
 
 ---
 
-## Phase 2 — Agent target adapter  *(the real fix; medium–large)*
+## Phase 2 — Agent target adapter  *(SHIPPED 2026-08-21)*
+
+**Status: done.** (1) **Profiles** — `--profile`/`--judge-profile`
+(openai|anthropic|gemini|azure|template) via a `Provider` interface; the generic
+`template` profile hits any custom JSON API (config-driven, payloads always
+re-escaped). (2) **Agent mode** — `--agent-mode` suppresses quirn's synthetic
+system prompt (tests the app's own prompt/guardrails/tools) and switches the
+canary-dependent probes (LLM02/LLM07/LLM06) to app-relative goals (leak the app's
+OWN secret/system-prompt, take its OWN unauthorized action). (3) **`--app-purpose`**
+feeds the judge the app's intended purpose so it scores a real break vs on-task
+behavior. Model mode stays byte-identical. Unit-tested + live-validated both ways
+(a well-aligned app → SAFE, a naive app → VULNERABLE, judged on a separate plain
+endpoint). Not yet: optional session/cookie passthrough (deferred; add if needed).
 
 **Goal.** Point quirn at a deployed agent's HTTP API (not just OpenAI-compatible
 model endpoints), sending only the *user turn* — the app supplies its own system

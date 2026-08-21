@@ -104,6 +104,30 @@ text can never break out of the JSON or smuggle in another placeholder. The
 `api-key` never lives in the config file — it comes from `--api-key`/env and is
 substituted into `{{apiKey}}` at request time.
 
+### Agent mode (test the deployed app, not the bare model)
+
+By default quirn tests a *model*: it supplies its own system prompt to set up a
+scenario, then attacks it. `--agent-mode` instead tests your *deployed
+application* — pair it with a `--profile`/template pointed at the app's API and
+quirn:
+
+- **suppresses its synthetic system prompts** and sends only the user turn, so
+  the app's OWN system prompt, guardrails and tools are what's under test;
+- switches the canary-dependent probes (LLM02 secret, LLM07 system-prompt, LLM06
+  tools) to **app-relative signals** — does the app leak *its own* secret / system
+  prompt, or take *its own* unauthorized action?
+- hands the judge `--app-purpose "…"` so it scores a genuine break against normal
+  on-task behavior for that app (`--app-purpose` also works in model mode).
+
+```sh
+quirn scan --profile template --config app.json --agent-mode \
+  --app-purpose "a retail shopping assistant" \
+  --judge-target https://api.openai.com --judge-model gpt-4o --judge-api-key $OPENAI_KEY
+```
+
+Use a **separate judge endpoint** (the `--judge-target` flags) so the judge is a
+plain model call, not wrapped in your app's request template.
+
 ### Baseline (ratchet)
 
 Adopt on a noisy codebase without disabling the gate: snapshot today's findings once, then only *new* vulnerabilities break the build.

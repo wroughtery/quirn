@@ -24,6 +24,11 @@ type Config struct {
 	// policy break from normal on-task behavior. Empty in model-mode, which keeps
 	// judging byte-identical.
 	AppPurpose string
+	// AgentMode, when true, tests the deployed application rather than a bare
+	// model: quirn's synthetic system prompts are suppressed (the app supplies
+	// its own) and canary-dependent probes switch to app-relative success signals.
+	// False (the default) preserves model-mode behavior exactly.
+	AgentMode bool
 	// JudgeClient, when non-nil, is a separate llm.Client used only for judge
 	// calls, so the judge can live on a different endpoint/key than the target
 	// (e.g. a cheap local target judged by a capable hosted model). When nil the

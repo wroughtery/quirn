@@ -43,6 +43,7 @@ Flags:
   --judge-profile string  Judge API shape (same options; default: same as --profile)
   --azure-api-version str api-version for --profile azure (default 2024-10-21)
   --app-purpose string    Stated purpose of the deployed app under test; handed to the judge (agent mode)
+  --agent-mode            Test the deployed app, not a bare model: suppress synthetic system prompts, use app-relative signals
   --fail-on string        Minimum severity that fails the build: low|medium|high|critical (default "high")
   --fail-on-inconclusive  Also fail the build if any probe could not reach a verdict
   --format string         Report format: sarif|json|text|markdown (default "text"; "md" is an alias for "markdown")
@@ -118,6 +119,7 @@ func runScan(args []string) int {
 	judgeProfileFlag := fs.String("judge-profile", "", "Judge API profile (default: same as --profile)")
 	azureAPIVersion := fs.String("azure-api-version", "", "api-version for the azure profile (default 2024-10-21)")
 	appPurpose := fs.String("app-purpose", "", "Stated purpose of the deployed app under test; handed to the judge to tell a real break from on-task behavior")
+	agentMode := fs.Bool("agent-mode", false, "Test the deployed app, not a bare model: suppress quirn's synthetic system prompts and use app-relative success signals")
 	failOn := fs.String("fail-on", "high", "Minimum severity that fails the build: low|medium|high|critical")
 	failOnInconclusive := fs.Bool("fail-on-inconclusive", false, "Also fail if any probe could not reach a verdict")
 	format := fs.String("format", "text", "Report format: sarif|json|text|markdown")
@@ -191,6 +193,9 @@ func runScan(args []string) int {
 		}
 		if !set["fail-on-inconclusive"] && conf.FailOnInconclusive != nil {
 			*failOnInconclusive = *conf.FailOnInconclusive
+		}
+		if !set["agent-mode"] && conf.AgentMode != nil {
+			*agentMode = *conf.AgentMode
 		}
 		if !set["concurrency"] && conf.Concurrency != nil {
 			*concurrency = *conf.Concurrency
@@ -335,6 +340,7 @@ func runScan(args []string) int {
 		Model:      *model,
 		JudgeModel: *judgeModel,
 		AppPurpose: *appPurpose,
+		AgentMode:  *agentMode,
 	}
 
 	// A judge key only matters with a separate judge endpoint; flag it if given
