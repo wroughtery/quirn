@@ -2,6 +2,8 @@
   "version": 1,
   "target": "http://localhost:1234",
   "model": "gpt-4o-mini",
+  "judge_model": "gpt-4o",
+  "judge_target": "https://api.openai.com",
   "fail_on": "high",
   "format": "sarif",
   "concurrency": 4,

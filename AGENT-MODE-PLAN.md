@@ -16,7 +16,18 @@ start it (see "Detail on start").
 
 ---
 
-## Phase 1 — Separate judge endpoint + key  *(small; ship first)*
+## Phase 1 — Separate judge endpoint + key  *(SHIPPED 2026-08-21)*
+
+**Status: done.** `--judge-target` / `--judge-api-key` + `QUIRN_JUDGE_API_KEY` +
+config `judge_target` land the judge on its own endpoint/key; the judge client is
+threaded via `probe.Config.JudgeClient` (nil ⇒ reuse target, byte-identical).
+Two deviations from the draft below, both deliberate: (1) **no `judge_api_key`
+config field** — like the target `api_key` the judge key lives only in flag/env,
+so a committed config never carries a secret; (2) the target-key fallback is
+reused **only when the judge is on the same host** as the target, else quirn
+sends no key and warns — a real target credential never crosses to another host.
+Unit-tested (routing + key isolation, same-/cross-host) and live-validated (real
+gemma-3-1b target judged via a separate local endpoint).
 
 **Goal.** Let the judge live on a different endpoint/key than the target, so you can
 test a cheap/local target but judge with a capable API (GPT-4o / Claude). Bonus: a

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -34,7 +35,9 @@ Flags:
   --target string        Base URL of the OpenAI-compatible endpoint under test (required)
   --model string          Model name to send probe payloads to (default "gpt-4o-mini")
   --judge-model string    Model name used to judge probe outcomes (default: same as --model)
+  --judge-target string   Base URL of a separate endpoint for the judge model (default: reuse --target)
   --api-key string        API key for the target endpoint (overrides QUIRN_API_KEY env var)
+  --judge-api-key string  API key for --judge-target (overrides QUIRN_JUDGE_API_KEY; falls back to the target key)
   --fail-on string        Minimum severity that fails the build: low|medium|high|critical (default "high")
   --fail-on-inconclusive  Also fail the build if any probe could not reach a verdict
   --format string         Report format: sarif|json|text|markdown (default "text"; "md" is an alias for "markdown")
@@ -60,6 +63,7 @@ Examples:
   quirn scan --target https://api.openai.com --model gpt-4o-mini --format sarif --out results.sarif
   quirn scan --target http://localhost:1234 --baseline .quirn-baseline.json --write-baseline
   quirn scan --target http://localhost:1234 --baseline .quirn-baseline.json --fail-on high
+  quirn scan --target http://localhost:1234 --model qwen3-8b --judge-target https://api.openai.com --judge-model gpt-4o --judge-api-key $OPENAI_KEY
 `
 
 // version is the tool version, overridable at build time with
@@ -101,6 +105,8 @@ func runScan(args []string) int {
 	model := fs.String("model", "gpt-4o-mini", "Model name to send probe payloads to")
 	judgeModel := fs.String("judge-model", "", "Model name used to judge probe outcomes (default: same as --model)")
 	apiKeyFlag := fs.String("api-key", "", "API key for the target endpoint (overrides QUIRN_API_KEY env var)")
+	judgeTarget := fs.String("judge-target", "", "Base URL of a separate endpoint for the judge model (default: reuse --target)")
+	judgeAPIKeyFlag := fs.String("judge-api-key", "", "API key for --judge-target (overrides QUIRN_JUDGE_API_KEY; falls back to the target key)")
 	failOn := fs.String("fail-on", "high", "Minimum severity that fails the build: low|medium|high|critical")
 	failOnInconclusive := fs.Bool("fail-on-inconclusive", false, "Also fail if any probe could not reach a verdict")
 	format := fs.String("format", "text", "Report format: sarif|json|text|markdown")
@@ -158,6 +164,7 @@ func runScan(args []string) int {
 		applyStr("target", target, conf.Target)
 		applyStr("model", model, conf.Model)
 		applyStr("judge-model", judgeModel, conf.JudgeModel)
+		applyStr("judge-target", judgeTarget, conf.JudgeTarget)
 		applyStr("fail-on", failOn, conf.FailOn)
 		applyStr("format", format, conf.Format)
 		applyStr("baseline", baselinePath, conf.Baseline)
@@ -294,6 +301,40 @@ func runScan(args []string) int {
 		JudgeModel: *judgeModel,
 	}
 
+	// A judge key only matters with a separate judge endpoint; flag it if given
+	// without one, since it would otherwise be silently ignored.
+	if *judgeAPIKeyFlag != "" && *judgeTarget == "" {
+		fmt.Fprintln(os.Stderr, "quirn: --judge-api-key set without --judge-target; the judge reuses the target endpoint, so this key is ignored")
+	}
+
+	// A separate judge endpoint lets a cheap/local target be judged by a capable
+	// model. Judge-key precedence: flag > env > (fallback) the target key, but the
+	// target key is reused ONLY when the judge is on the SAME host (the same-
+	// provider common case). A real target key is never sent to a different host;
+	// there we send none and warn. The judge client inherits the target's
+	// retry/timeout settings. Absent --judge-target, JudgeClient stays nil and the
+	// judge reuses the target client, keeping single-endpoint runs byte-identical.
+	if *judgeTarget != "" {
+		judgeKey := *judgeAPIKeyFlag
+		if judgeKey == "" {
+			judgeKey = os.Getenv("QUIRN_JUDGE_API_KEY")
+		}
+		if judgeKey == "" {
+			if sameHost(*judgeTarget, *target) {
+				judgeKey = apiKey
+			} else if apiKey != "" {
+				fmt.Fprintln(os.Stderr, "quirn: --judge-target is on a different host than --target and no judge key was given; the judge will send no API key (set --judge-api-key or QUIRN_JUDGE_API_KEY)")
+			}
+		}
+		judgeClient := llm.NewClient(*judgeTarget, judgeKey)
+		if *maxRetries >= 0 {
+			judgeClient.MaxRetries = *maxRetries
+		}
+		judgeClient.SetRequestTimeout(*requestTimeout)
+		cfg.JudgeClient = judgeClient
+		fmt.Fprintf(os.Stderr, "quirn: judging via %s (model %s)\n", *judgeTarget, *judgeModel)
+	}
+
 	// A cancellable context underlies the scan so the dashboard's Stop button
 	// (and the optional --timeout) can end it; cancelling this parent propagates
 	// to the timeout child the scan actually runs under.
@@ -415,6 +456,19 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// sameHost reports whether two base URLs point at the same host:port. The judge
+// reuses the target's API key only when this is true, so a real target key is
+// never sent to a different host. A URL that fails to parse or has no host is
+// treated as "not the same host" — the safe default (send no key).
+func sameHost(a, b string) bool {
+	ua, err1 := url.Parse(a)
+	ub, err2 := url.Parse(b)
+	if err1 != nil || err2 != nil || ua.Host == "" {
+		return false
+	}
+	return ua.Host == ub.Host
 }
 
 // unknownProbeIDs returns the keys of sevs that match neither a built-in probe

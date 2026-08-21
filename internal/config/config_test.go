@@ -22,6 +22,7 @@ func TestLoadValid(t *testing.T) {
 		"target": "http://t",
 		"model": "m",
 		"judge_model": "j",
+		"judge_target": "http://j2",
 		"fail_on": "critical",
 		"fail_on_inconclusive": true,
 		"format": "json",
@@ -37,7 +38,7 @@ func TestLoadValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if f.Target != "http://t" || f.Model != "m" || f.JudgeModel != "j" {
+	if f.Target != "http://t" || f.Model != "m" || f.JudgeModel != "j" || f.JudgeTarget != "http://j2" {
 		t.Errorf("string fields wrong: %+v", f)
 	}
 	if f.FailOnInconclusive == nil || !*f.FailOnInconclusive {

@@ -40,7 +40,14 @@ func newResult(p Probe) Result {
 // could not be scored (transport error or unparseable judge reply). A
 // confirmed vulnerability always takes precedence over inconclusive attempts.
 func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result, attacks []attack) Result {
-	j := judge.New(client, cfg.JudgeModel)
+	// The judge runs on its own client when one is configured (a separate
+	// endpoint/key), otherwise it reuses the target client. The target itself is
+	// always reached via client.
+	judgeClient := cfg.JudgeClient
+	if judgeClient == nil {
+		judgeClient = client
+	}
+	j := judge.New(judgeClient, cfg.JudgeModel)
 	obs := cfg.Observer
 
 	live.Emit(obs, live.Event{

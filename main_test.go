@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"quirn/internal/mockllm"
@@ -67,6 +71,53 @@ const injMarker = "PWNED"
 
 // senMarker makes only the LLM02 sensitive-disclosure probe come back vulnerable.
 const senMarker = "sk_live_ACME"
+
+// roleCounts records, per endpoint, how many judge vs target requests it served
+// and every Authorization header it saw, so a test can prove which endpoint
+// played which role and that keys never crossed between them.
+type roleCounts struct {
+	mu     sync.Mutex
+	judge  int
+	target int
+	auths  map[string]bool
+}
+
+func (c *roleCounts) record(isJudge bool, auth string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if isJudge {
+		c.judge++
+	} else {
+		c.target++
+	}
+	c.auths[auth] = true
+}
+
+func (c *roleCounts) judgeCalls() int  { c.mu.Lock(); defer c.mu.Unlock(); return c.judge }
+func (c *roleCounts) targetCalls() int { c.mu.Lock(); defer c.mu.Unlock(); return c.target }
+func (c *roleCounts) sawAuth(a string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.auths[a]
+}
+
+// countingServer wraps the shared mockllm handler but also tallies, per request,
+// whether it was a judge call (body carries the rubric) and the Authorization
+// header, so a test can assert endpoint routing and key isolation.
+func countingServer(t *testing.T, vulnMarkers []string) (url string, counts *roleCounts) {
+	t.Helper()
+	h, _ := mockllm.Handler(mockllm.Config{VulnMarkers: vulnMarkers})
+	counts = &roleCounts{auths: map[string]bool{}}
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		counts.record(strings.Contains(string(body), "security judge"), r.Header.Get("Authorization"))
+		r.Body = io.NopCloser(bytes.NewReader(body)) // rewind for mockllm
+		h.ServeHTTP(w, r)
+	})
+	srv := httptest.NewServer(wrapped)
+	t.Cleanup(srv.Close)
+	return srv.URL, counts
+}
 
 func readFile(t *testing.T, path string) string {
 	t.Helper()
@@ -421,5 +472,155 @@ func TestRunConfigCustomProbeCollision(t *testing.T) {
 	}`, url))
 	if code := run([]string{"scan", "--config", cfg}); code != 2 {
 		t.Fatalf("exit = %d, want 2 (custom id collides with built-in)", code)
+	}
+}
+
+// --judge-target routes every judge call to a second endpoint with its own key:
+// the judge marks injection vulnerable on the judge server while the target
+// server only ever serves target calls, and the two keys never cross.
+func TestRunSeparateJudgeEndpoint(t *testing.T) {
+	targetURL, tCounts := countingServer(t, nil)                // target: benign replies only
+	judgeURL, jCounts := countingServer(t, []string{injMarker}) // judge: marks injection vulnerable
+	out := filepath.Join(t.TempDir(), "r.json")
+
+	code := run([]string{"scan",
+		"--target", targetURL, "--api-key", "target-key",
+		"--judge-target", judgeURL, "--judge-api-key", "judge-key",
+		"--fail-on", "high", "--format", "json", "--out", out,
+	})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (judge on 2nd endpoint marks injection vulnerable)", code)
+	}
+
+	// The judge runs on the judge endpoint, the target on the target endpoint —
+	// neither serves the other's role.
+	if jCounts.judgeCalls() == 0 {
+		t.Errorf("judge endpoint served no judge calls")
+	}
+	if tCounts.judgeCalls() != 0 {
+		t.Errorf("target endpoint served %d judge calls; the judge must route to --judge-target", tCounts.judgeCalls())
+	}
+	if tCounts.targetCalls() == 0 {
+		t.Errorf("target endpoint served no target calls")
+	}
+	if jCounts.targetCalls() != 0 {
+		t.Errorf("judge endpoint served %d target calls; the target must route to --target", jCounts.targetCalls())
+	}
+
+	// Keys stay on their own endpoint.
+	if !jCounts.sawAuth("Bearer judge-key") {
+		t.Errorf("judge endpoint auth = %v, want it to include Bearer judge-key", jCounts.auths)
+	}
+	if jCounts.sawAuth("Bearer target-key") {
+		t.Errorf("target key leaked to the judge endpoint: %v", jCounts.auths)
+	}
+	if !tCounts.sawAuth("Bearer target-key") {
+		t.Errorf("target endpoint auth = %v, want it to include Bearer target-key", tCounts.auths)
+	}
+
+	if got := readEnvelopeFindings(t, out)["prompt-injection"]; !got.Vulnerable {
+		t.Errorf("prompt-injection should be vulnerable, got %+v", got)
+	}
+}
+
+// Without --judge-target the judge reuses the target client: judge and target
+// calls both hit the single endpoint with the single key (the original behavior).
+func TestRunJudgeReusesTargetWhenNoJudgeEndpoint(t *testing.T) {
+	url, counts := countingServer(t, []string{injMarker})
+	out := filepath.Join(t.TempDir(), "r.json")
+
+	code := run([]string{"scan", "--target", url, "--api-key", "solo-key",
+		"--fail-on", "high", "--format", "json", "--out", out})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (single endpoint, injection vulnerable)", code)
+	}
+	if counts.judgeCalls() == 0 || counts.targetCalls() == 0 {
+		t.Errorf("single endpoint should serve both roles, got judge=%d target=%d",
+			counts.judgeCalls(), counts.targetCalls())
+	}
+	if !counts.sawAuth("Bearer solo-key") {
+		t.Errorf("endpoint auth = %v, want Bearer solo-key", counts.auths)
+	}
+}
+
+// With --judge-target on the SAME host and no judge key, the judge reuses the
+// target key — the same-provider common case.
+func TestRunJudgeKeyReusedForSameHost(t *testing.T) {
+	url, counts := countingServer(t, nil)
+	out := filepath.Join(t.TempDir(), "r.json")
+
+	t.Setenv("QUIRN_JUDGE_API_KEY", "") // ensure env does not supply a judge key
+	// --judge-target == --target: same host, so the target key is reused.
+	run([]string{"scan", "--target", url, "--api-key", "shared-key",
+		"--judge-target", url, "--format", "json", "--out", out})
+
+	if !counts.sawAuth("Bearer shared-key") {
+		t.Errorf("same-host judge should reuse the target key; saw %v", counts.auths)
+	}
+	if counts.judgeCalls() == 0 || counts.targetCalls() == 0 {
+		t.Errorf("both roles should hit the shared endpoint, got judge=%d target=%d",
+			counts.judgeCalls(), counts.targetCalls())
+	}
+}
+
+// With --judge-target on a DIFFERENT host and no judge key, the target key must
+// NOT leak to the judge endpoint: the judge sends no Authorization header.
+func TestRunJudgeKeyNotLeakedCrossHost(t *testing.T) {
+	targetURL, tCounts := countingServer(t, nil)
+	judgeURL, jCounts := countingServer(t, nil)
+	out := filepath.Join(t.TempDir(), "r.json")
+
+	t.Setenv("QUIRN_JUDGE_API_KEY", "") // no judge key anywhere
+	run([]string{"scan", "--target", targetURL, "--api-key", "target-key",
+		"--judge-target", judgeURL, "--format", "json", "--out", out})
+
+	if jCounts.sawAuth("Bearer target-key") {
+		t.Errorf("target key leaked to a different-host judge endpoint: %v", jCounts.auths)
+	}
+	if !jCounts.sawAuth("") {
+		t.Errorf("cross-host judge with no key should send no Authorization header; saw %v", jCounts.auths)
+	}
+	if !tCounts.sawAuth("Bearer target-key") {
+		t.Errorf("target endpoint should still use the target key; saw %v", tCounts.auths)
+	}
+}
+
+// QUIRN_JUDGE_API_KEY supplies the judge key when no --judge-api-key flag is set,
+// and it must not bleed onto the target endpoint.
+func TestRunJudgeKeyFromEnv(t *testing.T) {
+	targetURL, tCounts := countingServer(t, nil)
+	judgeURL, jCounts := countingServer(t, nil)
+	out := filepath.Join(t.TempDir(), "r.json")
+
+	t.Setenv("QUIRN_JUDGE_API_KEY", "env-judge-key")
+	run([]string{"scan", "--target", targetURL, "--api-key", "target-key",
+		"--judge-target", judgeURL, "--format", "json", "--out", out})
+
+	if !jCounts.sawAuth("Bearer env-judge-key") {
+		t.Errorf("judge endpoint should use QUIRN_JUDGE_API_KEY; saw %v", jCounts.auths)
+	}
+	if tCounts.sawAuth("Bearer env-judge-key") {
+		t.Errorf("judge env key leaked to the target endpoint: %v", tCounts.auths)
+	}
+}
+
+// judge_target from a config file routes the judge to the second endpoint, same
+// as the flag.
+func TestRunConfigJudgeTarget(t *testing.T) {
+	targetURL, tCounts := countingServer(t, nil)
+	judgeURL, jCounts := countingServer(t, []string{injMarker})
+	out := filepath.Join(t.TempDir(), "r.json")
+
+	cfg := writeConfigFile(t, fmt.Sprintf(
+		`{"version":1,"target":%q,"judge_target":%q,"format":"json"}`, targetURL, judgeURL))
+	code := run([]string{"scan", "--config", cfg, "--fail-on", "high", "--out", out})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (config judge_target routes the judge)", code)
+	}
+	if jCounts.judgeCalls() == 0 {
+		t.Errorf("config judge_target endpoint served no judge calls")
+	}
+	if tCounts.judgeCalls() != 0 {
+		t.Errorf("target endpoint served %d judge calls despite config judge_target", tCounts.judgeCalls())
 	}
 }

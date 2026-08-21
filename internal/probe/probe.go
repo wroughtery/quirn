@@ -19,6 +19,12 @@ type Config struct {
 	// JudgeModel is the model name used to judge whether an attack
 	// succeeded. May be empty if judging is not yet implemented for a probe.
 	JudgeModel string
+	// JudgeClient, when non-nil, is a separate llm.Client used only for judge
+	// calls, so the judge can live on a different endpoint/key than the target
+	// (e.g. a cheap local target judged by a capable hosted model). When nil the
+	// judge reuses the target client, which is byte-identical to the original
+	// single-endpoint behavior.
+	JudgeClient *llm.Client
 	// Observer, when non-nil, receives live lifecycle events as the probe
 	// runs (payload sent, target reply, judge verdict). It is purely
 	// observational: it never affects the Result or report output. Nil in the

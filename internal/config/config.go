@@ -29,10 +29,15 @@ var ErrNotExist = errors.New("config file does not exist")
 // absent key from a present zero value, so the caller can apply a config value
 // only where the user did not pass an explicit flag.
 type File struct {
-	Version            int      `json:"version"`
-	Target             string   `json:"target"`
-	Model              string   `json:"model"`
-	JudgeModel         string   `json:"judge_model"`
+	Version    int    `json:"version"`
+	Target     string `json:"target"`
+	Model      string `json:"model"`
+	JudgeModel string `json:"judge_model"`
+	// JudgeTarget is the base URL of a separate endpoint to run the judge model
+	// against. The judge API key is deliberately NOT a config field: like the
+	// target api_key it lives only in --judge-api-key / QUIRN_JUDGE_API_KEY, so a
+	// committed config file never carries a secret.
+	JudgeTarget        string   `json:"judge_target"`
 	FailOn             string   `json:"fail_on"`
 	FailOnInconclusive *bool    `json:"fail_on_inconclusive"`
 	Format             string   `json:"format"`
