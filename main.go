@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -38,6 +39,9 @@ Flags:
   --judge-target string   Base URL of a separate endpoint for the judge model (default: reuse --target)
   --api-key string        API key for the target endpoint (overrides QUIRN_API_KEY env var)
   --judge-api-key string  API key for --judge-target (overrides QUIRN_JUDGE_API_KEY; falls back to the target key)
+  --profile string        Target API shape: openai|anthropic|gemini|azure|template (default openai; template needs --config)
+  --judge-profile string  Judge API shape (same options; default: same as --profile)
+  --azure-api-version str api-version for --profile azure (default 2024-10-21)
   --fail-on string        Minimum severity that fails the build: low|medium|high|critical (default "high")
   --fail-on-inconclusive  Also fail the build if any probe could not reach a verdict
   --format string         Report format: sarif|json|text|markdown (default "text"; "md" is an alias for "markdown")
@@ -64,6 +68,8 @@ Examples:
   quirn scan --target http://localhost:1234 --baseline .quirn-baseline.json --write-baseline
   quirn scan --target http://localhost:1234 --baseline .quirn-baseline.json --fail-on high
   quirn scan --target http://localhost:1234 --model qwen3-8b --judge-target https://api.openai.com --judge-model gpt-4o --judge-api-key $OPENAI_KEY
+  quirn scan --target https://api.anthropic.com --model claude-sonnet-4 --profile anthropic --api-key $ANTHROPIC_KEY
+  quirn scan --config quirn.json   # --profile template: describe any custom JSON API in the config
 `
 
 // version is the tool version, overridable at build time with
@@ -107,6 +113,9 @@ func runScan(args []string) int {
 	apiKeyFlag := fs.String("api-key", "", "API key for the target endpoint (overrides QUIRN_API_KEY env var)")
 	judgeTarget := fs.String("judge-target", "", "Base URL of a separate endpoint for the judge model (default: reuse --target)")
 	judgeAPIKeyFlag := fs.String("judge-api-key", "", "API key for --judge-target (overrides QUIRN_JUDGE_API_KEY; falls back to the target key)")
+	profileFlag := fs.String("profile", "", "Target API profile: openai|anthropic|gemini|azure|template (default openai)")
+	judgeProfileFlag := fs.String("judge-profile", "", "Judge API profile (default: same as --profile)")
+	azureAPIVersion := fs.String("azure-api-version", "", "api-version for the azure profile (default 2024-10-21)")
 	failOn := fs.String("fail-on", "high", "Minimum severity that fails the build: low|medium|high|critical")
 	failOnInconclusive := fs.Bool("fail-on-inconclusive", false, "Also fail if any probe could not reach a verdict")
 	format := fs.String("format", "text", "Report format: sarif|json|text|markdown")
@@ -165,6 +174,9 @@ func runScan(args []string) int {
 		applyStr("model", model, conf.Model)
 		applyStr("judge-model", judgeModel, conf.JudgeModel)
 		applyStr("judge-target", judgeTarget, conf.JudgeTarget)
+		applyStr("profile", profileFlag, conf.Profile)
+		applyStr("judge-profile", judgeProfileFlag, conf.JudgeProfile)
+		applyStr("azure-api-version", azureAPIVersion, conf.AzureAPIVersion)
 		applyStr("fail-on", failOn, conf.FailOn)
 		applyStr("format", format, conf.Format)
 		applyStr("baseline", baselinePath, conf.Baseline)
@@ -295,6 +307,26 @@ func runScan(args []string) int {
 	}
 	client.SetRequestTimeout(*requestTimeout)
 
+	// Provider selects the API shape: openai (default) or anthropic/gemini/azure,
+	// or a config-driven "template" for any custom endpoint. Built once and
+	// attached to the target client; a bad profile/template is a usage error.
+	provOpts := llm.ProviderOpts{AzureAPIVersion: *azureAPIVersion}
+	var targetTmplRaw, judgeTmplRaw json.RawMessage
+	if conf != nil {
+		targetTmplRaw, judgeTmplRaw = conf.Template, conf.JudgeTemplate
+	}
+	targetTmpl, err := templateProfile(*profileFlag, targetTmplRaw, "template")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+		return 2
+	}
+	targetProvider, err := llm.NewProvider(*profileFlag, targetTmpl, provOpts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+		return 2
+	}
+	client.Provider = targetProvider
+
 	cfg := probe.Config{
 		Target:     *target,
 		Model:      *model,
@@ -331,8 +363,39 @@ func runScan(args []string) int {
 			judgeClient.MaxRetries = *maxRetries
 		}
 		judgeClient.SetRequestTimeout(*requestTimeout)
+
+		// The judge profile defaults to the target profile (same provider family is
+		// the common case), with two footgun guards: a judge_template in the config
+		// signals the judge should use the template profile, and a custom target
+		// template is NOT blindly inherited by a separate judge endpoint (that judge
+		// defaults to openai). --judge-profile overrides all of this.
+		judgeProfile := *judgeProfileFlag
+		if judgeProfile == "" {
+			switch {
+			case len(judgeTmplRaw) > 0:
+				judgeProfile = "template"
+			case *profileFlag == "template":
+				judgeProfile = "openai"
+			default:
+				judgeProfile = *profileFlag
+			}
+		}
+		if judgeProfile != "template" && len(judgeTmplRaw) > 0 {
+			fmt.Fprintln(os.Stderr, "quirn: judge_template is set but the judge profile is not \"template\"; ignoring judge_template")
+		}
+		judgeTmpl, err := templateProfile(judgeProfile, judgeTmplRaw, "judge_template")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+			return 2
+		}
+		judgeProvider, err := llm.NewProvider(judgeProfile, judgeTmpl, provOpts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+			return 2
+		}
+		judgeClient.Provider = judgeProvider
 		cfg.JudgeClient = judgeClient
-		fmt.Fprintf(os.Stderr, "quirn: judging via %s (model %s)\n", *judgeTarget, *judgeModel)
+		fmt.Fprintf(os.Stderr, "quirn: judging via %s (model %s, profile %s)\n", *judgeTarget, *judgeModel, judgeProfile)
 	}
 
 	// A cancellable context underlies the scan so the dashboard's Stop button
@@ -456,6 +519,25 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// templateProfile parses the generic http-template definition for a "template"
+// profile out of its raw config JSON. It returns (nil, nil) for any other
+// profile. `which` names the config key ("template" or "judge_template") for
+// clear error messages. Validation of the template's contents is done by the llm
+// package when the provider is built.
+func templateProfile(profile string, raw json.RawMessage, which string) (*llm.TemplateConfig, error) {
+	if profile != "template" {
+		return nil, nil
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("profile \"template\" requires a %q config object (set it via --config)", which)
+	}
+	var tc llm.TemplateConfig
+	if err := json.Unmarshal(raw, &tc); err != nil {
+		return nil, fmt.Errorf("parse %s config: %w", which, err)
+	}
+	return &tc, nil
 }
 
 // sameHost reports whether two base URLs point at the same host:port. The judge

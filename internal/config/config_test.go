@@ -23,6 +23,9 @@ func TestLoadValid(t *testing.T) {
 		"model": "m",
 		"judge_model": "j",
 		"judge_target": "http://j2",
+		"profile": "anthropic",
+		"judge_profile": "gemini",
+		"azure_api_version": "2024-10-21",
 		"fail_on": "critical",
 		"fail_on_inconclusive": true,
 		"format": "json",
@@ -40,6 +43,9 @@ func TestLoadValid(t *testing.T) {
 	}
 	if f.Target != "http://t" || f.Model != "m" || f.JudgeModel != "j" || f.JudgeTarget != "http://j2" {
 		t.Errorf("string fields wrong: %+v", f)
+	}
+	if f.Profile != "anthropic" || f.JudgeProfile != "gemini" || f.AzureAPIVersion != "2024-10-21" {
+		t.Errorf("profile fields wrong: %+v", f)
 	}
 	if f.FailOnInconclusive == nil || !*f.FailOnInconclusive {
 		t.Error("fail_on_inconclusive should be true")

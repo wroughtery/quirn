@@ -38,7 +38,7 @@ func TestChatSuccess(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
-		var req chatRequest
+		var req openAIRequest
 		_ = json.Unmarshal(body, &req)
 		gotModel = req.Model
 		io.WriteString(w, okBody("hello there"))

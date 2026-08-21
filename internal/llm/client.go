@@ -5,7 +5,6 @@ package llm
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
@@ -57,6 +56,19 @@ type Client struct {
 	MaxRetries int
 	// BackoffBase is the base delay for exponential backoff between retries.
 	BackoffBase time.Duration
+	// Provider maps the chat call onto a specific API shape (request + reply
+	// parsing). Nil means the default OpenAI-compatible shape, so existing
+	// callers and struct literals are unchanged.
+	Provider Provider
+}
+
+// provider returns the Client's Provider, defaulting to the OpenAI-compatible
+// shape when unset so a zero-value or NewClient-built Client behaves as before.
+func (c *Client) provider() Provider {
+	if c.Provider != nil {
+		return c.Provider
+	}
+	return OpenAIProvider{}
 }
 
 // NewClient builds a Client for the given base URL (e.g. "http://localhost:1234"
@@ -91,20 +103,6 @@ func (c *Client) SetRequestTimeout(d time.Duration) {
 	c.HTTPClient.Timeout = d
 }
 
-type chatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-}
-
-type chatResponse struct {
-	Choices []struct {
-		Message Message `json:"message"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
 // Chat sends messages to the given model and returns the assistant's reply
 // content. The provided context controls request timeout/cancellation. A
 // transient failure (network error, or HTTP 429/500/502/503/504) is retried up
@@ -123,11 +121,10 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (st
 		httpClient = defaultHTTPClient
 	}
 
-	reqBody, err := json.Marshal(chatRequest{Model: model, Messages: messages})
+	spec, err := c.provider().BuildSpec(c.BaseURL, c.APIKey, model, messages)
 	if err != nil {
-		return "", fmt.Errorf("llm: encode request: %w", err)
+		return "", fmt.Errorf("llm: %w", err)
 	}
-	url := c.BaseURL + "/v1/chat/completions"
 
 	base := c.BackoffBase
 	if base <= 0 {
@@ -144,7 +141,7 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (st
 			}
 		}
 
-		content, ra, retryable, err := c.attempt(ctx, httpClient, url, reqBody)
+		content, ra, retryable, err := c.attempt(ctx, httpClient, spec)
 		if err == nil {
 			return content, nil
 		}
@@ -165,14 +162,13 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message) (st
 // attempt performs one HTTP round trip. It returns the reply content on success,
 // or an error plus whether that error is worth retrying and any server-provided
 // Retry-After delay.
-func (c *Client) attempt(ctx context.Context, httpClient *http.Client, url string, reqBody []byte) (content string, retryAfter time.Duration, retryable bool, err error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+func (c *Client) attempt(ctx context.Context, httpClient *http.Client, spec chatSpec) (content string, retryAfter time.Duration, retryable bool, err error) {
+	httpReq, err := http.NewRequestWithContext(ctx, spec.method, spec.url, bytes.NewReader(spec.body))
 	if err != nil {
 		return "", 0, false, fmt.Errorf("llm: build request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if c.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+	for k, v := range spec.headers {
+		httpReq.Header.Set(k, v)
 	}
 
 	resp, err := httpClient.Do(httpReq)
@@ -197,17 +193,11 @@ func (c *Client) attempt(ctx context.Context, httpClient *http.Client, url strin
 			fmt.Errorf("llm: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var chatResp chatResponse
-	if err := json.Unmarshal(body, &chatResp); err != nil {
-		return "", 0, false, fmt.Errorf("llm: decode response: %w", err)
+	reply, perr := c.provider().ParseReply(body)
+	if perr != nil {
+		return "", 0, false, fmt.Errorf("llm: %w", perr)
 	}
-	if chatResp.Error != nil {
-		return "", 0, false, fmt.Errorf("llm: api error: %s", chatResp.Error.Message)
-	}
-	if len(chatResp.Choices) == 0 {
-		return "", 0, false, fmt.Errorf("llm: no choices returned")
-	}
-	return chatResp.Choices[0].Message.Content, 0, false, nil
+	return reply, 0, false, nil
 }
 
 // isRetryableStatus reports whether an HTTP status is worth retrying: rate limits

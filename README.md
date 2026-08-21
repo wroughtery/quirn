@@ -26,7 +26,7 @@ export QUIRN_API_KEY=sk-...
 ./quirn scan --target https://api.openai.com --model gpt-4o-mini --fail-on high --format sarif --out quirn.sarif
 ```
 
-`quirn scan --target <url>` is the only required flag; see `quirn help` for the full flag list (`--model`, `--judge-model`, `--judge-target`, `--judge-api-key`, `--fail-on`, `--fail-on-inconclusive`, `--format`, `--concurrency`, `--timeout`, `--max-retries`, `--request-timeout`, `--only`, `--skip`, `--list-probes`, `--baseline`, `--write-baseline`, `--out`, `--config`, `--live`, `--dashboard`, `--dashboard-addr`). Transient model errors (HTTP 429/5xx or network blips) are retried with backoff (`--max-retries`, default 2, honoring `Retry-After`) so a rate limit doesn't become a false inconclusive. Each model call has a per-request timeout (`--request-timeout`, default 2m) separate from the overall scan deadline — **raise it for a slow local model** whose first/"thinking" responses can take minutes, e.g. `--request-timeout 5m`, or `0` to disable it and rely only on `--timeout`. `--format` accepts `text` (default), `json`, `sarif`, or `markdown` (a PR-comment scorecard). The `json` report is a deterministic envelope — `{tool, version, target, summary{probes,vulnerable,baselined,inconclusive,ok}, findings[]}`, no timestamp — so identical scans diff cleanly and downstream tooling gets pre-computed counts. `quirn version` prints the build version.
+`quirn scan --target <url>` is the only required flag; see `quirn help` for the full flag list (`--model`, `--judge-model`, `--judge-target`, `--judge-api-key`, `--profile`, `--judge-profile`, `--fail-on`, `--fail-on-inconclusive`, `--format`, `--concurrency`, `--timeout`, `--max-retries`, `--request-timeout`, `--only`, `--skip`, `--list-probes`, `--baseline`, `--write-baseline`, `--out`, `--config`, `--live`, `--dashboard`, `--dashboard-addr`). Transient model errors (HTTP 429/5xx or network blips) are retried with backoff (`--max-retries`, default 2, honoring `Retry-After`) so a rate limit doesn't become a false inconclusive. Each model call has a per-request timeout (`--request-timeout`, default 2m) separate from the overall scan deadline — **raise it for a slow local model** whose first/"thinking" responses can take minutes, e.g. `--request-timeout 5m`, or `0` to disable it and rely only on `--timeout`. `--format` accepts `text` (default), `json`, `sarif`, or `markdown` (a PR-comment scorecard). The `json` report is a deterministic envelope — `{tool, version, target, summary{probes,vulnerable,baselined,inconclusive,ok}, findings[]}`, no timestamp — so identical scans diff cleanly and downstream tooling gets pre-computed counts. `quirn version` prints the build version.
 
 **Exit codes:** `0` clean, `1` a finding at or above `--fail-on` (or the scan reached no verdict), `2` a usage error. Crucially the gate is **fail-closed**: if every probe is inconclusive — a wrong key, an unreachable target, a blown `--timeout` — quirn exits non-zero instead of reporting a false green, so a misconfigured CI run can't masquerade as a pass. Add `--fail-on-inconclusive` to also fail when *any* probe couldn't be scored.
 
@@ -55,6 +55,54 @@ config-settable. Absent `--judge-target`, the judge reuses the target endpoint
 exactly as before, so existing runs are unchanged. As a bonus, moving the judge
 off a single local target eases the serialization that otherwise forces
 `--concurrency 1`.
+
+### Non-OpenAI and custom APIs (profiles)
+
+By default quirn speaks the OpenAI `/v1/chat/completions` shape, which already
+covers OpenAI, Cerebras, Groq, Together, Fireworks, OpenRouter, Mistral,
+DeepInfra, vLLM, Ollama, LM Studio and llama.cpp. For providers with a different
+wire shape, pick a **profile** with `--profile` (and `--judge-profile` for the
+judge — it defaults to `--profile`):
+
+```sh
+quirn scan --target https://api.anthropic.com --model claude-sonnet-4 --profile anthropic
+quirn scan --target https://generativelanguage.googleapis.com --model gemini-2.0-flash --profile gemini
+quirn scan --target https://my.openai.azure.com --model my-deployment --profile azure --azure-api-version 2024-10-21
+```
+
+Built-in profiles: `openai` (default), `anthropic` (`/v1/messages`, `x-api-key`),
+`gemini` (`:generateContent`, `x-goog-api-key`), `azure` (deployment in the URL,
+`api-key` header). Keys resolve the same way as the OpenAI path (`--api-key` /
+`QUIRN_API_KEY`, and the `--judge-*` equivalents).
+
+**Any other API — `--profile template`.** Describe an arbitrary JSON-over-HTTP
+endpoint in the config; no code change, no new dependency. This is how you point
+quirn at a provider we haven't added, or at your *own deployed agent's* API:
+
+```json
+{
+  "version": 1,
+  "target": "https://my-agent.example.com",
+  "model": "prod",
+  "profile": "template",
+  "template": {
+    "method": "POST",
+    "url": "{{baseURL}}/api/chat",
+    "headers": { "Authorization": "Bearer {{apiKey}}" },
+    "body": { "system": "{{system}}", "question": "{{payload}}" },
+    "reply_path": "data.answer"
+  }
+}
+```
+
+Placeholders are substituted per call: `{{payload}}` `{{system}}` `{{model}}` in
+the JSON `body`; `{{apiKey}}` `{{model}}` `{{baseURL}}` in `url`/`headers`.
+`reply_path` is a dot path into the JSON response (numeric segments index
+arrays), e.g. `choices.0.message.content`. The `body` is a JSON *template*: an
+injected payload is always re-escaped when the request is marshaled, so attack
+text can never break out of the JSON or smuggle in another placeholder. The
+`api-key` never lives in the config file — it comes from `--api-key`/env and is
+substituted into `{{apiKey}}` at request time.
 
 ### Baseline (ratchet)
 
@@ -108,7 +156,7 @@ Pass `--config quirn.json` to supply defaults for any scan flag plus per-probe s
 }
 ```
 
-A custom `id` that collides with a built-in, a bad severity, or an attack missing its `goal`/`payload` is rejected up front. See [`quirn.example.json`](quirn.example.json) for the full set of keys (`target`, `model`, `judge_model`, `judge_target`, `fail_on`, `fail_on_inconclusive`, `format`, `concurrency`, `timeout`, `max_retries`, `request_timeout`, `only`, `skip`, `baseline`, `severities`, `custom_probes`).
+A custom `id` that collides with a built-in, a bad severity, or an attack missing its `goal`/`payload` is rejected up front. [`quirn.example.json`](quirn.example.json) is a worked example; the complete key set is `target`, `model`, `judge_model`, `judge_target`, `profile`, `judge_profile`, `template`, `judge_template`, `azure_api_version`, `fail_on`, `fail_on_inconclusive`, `format`, `concurrency`, `timeout`, `max_retries`, `request_timeout`, `only`, `skip`, `baseline`, `severities`, and `custom_probes` (`template`/`judge_template` are shown in the profiles section above).
 
 ### Live Monitoring
 

@@ -4,12 +4,17 @@
   "model": "gpt-4o-mini",
   "judge_model": "gpt-4o",
   "judge_target": "https://api.openai.com",
+  "profile": "openai",
+  "judge_profile": "openai",
+  "azure_api_version": "2024-10-21",
   "fail_on": "high",
+  "fail_on_inconclusive": false,
   "format": "sarif",
   "concurrency": 4,
   "timeout": "10m",
   "max_retries": 2,
   "request_timeout": "2m",
+  "baseline": ".quirn-baseline.json",
   "only": ["LLM01", "LLM02", "LLM06", "LLM07"],
   "severities": {
     "system-prompt-leakage": "high"

@@ -604,6 +604,124 @@ func TestRunJudgeKeyFromEnv(t *testing.T) {
 	}
 }
 
+// --profile anthropic makes quirn speak the Anthropic shape end-to-end: requests
+// hit /v1/messages with the x-api-key header, not the OpenAI path/Bearer.
+func TestRunProfileAnthropicRoutes(t *testing.T) {
+	var mu sync.Mutex
+	paths := map[string]int{}
+	sawKey := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths[r.URL.Path]++
+		if r.Header.Get("x-api-key") == "akey" {
+			sawKey = true
+		}
+		mu.Unlock()
+		io.WriteString(w, `{"content":[{"type":"text","text":"VERDICT: SAFE\nok"}]}`)
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "r.json")
+	code := run([]string{"scan", "--target", srv.URL, "--api-key", "akey",
+		"--profile", "anthropic", "--only", "LLM09", "--format", "json", "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (all safe via anthropic profile)", code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if paths["/v1/messages"] == 0 {
+		t.Errorf("no requests hit /v1/messages; anthropic profile not applied (paths=%v)", paths)
+	}
+	if !sawKey {
+		t.Error("x-api-key header never seen; anthropic profile not applied")
+	}
+}
+
+// An unknown --profile is a usage error, caught before the scan runs.
+func TestRunUnknownProfileIsUsageError(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	if code := run([]string{"scan", "--target", url, "--profile", "nope"}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (unknown profile)", code)
+	}
+}
+
+// --profile template with no template config is a usage error.
+func TestRunTemplateProfileNeedsConfig(t *testing.T) {
+	url, _ := scriptedServer(t, nil, false)
+	if code := run([]string{"scan", "--target", url, "--profile", "template"}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (template profile requires a template config)", code)
+	}
+}
+
+// A config-defined template profile routes to an arbitrary custom endpoint,
+// substituting {{baseURL}}/{{payload}} and extracting the reply via reply_path.
+func TestRunTemplateProfileViaConfig(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if r.URL.Path == "/chat" {
+			hits++
+		}
+		mu.Unlock()
+		io.WriteString(w, `{"out":"VERDICT: SAFE\nok"}`)
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "r.json")
+	cfg := writeConfigFile(t, fmt.Sprintf(
+		`{"version":1,"target":%q,"format":"json","profile":"template",`+
+			`"template":{"url":"{{baseURL}}/chat","body":{"msg":"{{payload}}"},"reply_path":"out"}}`, srv.URL))
+	code := run([]string{"scan", "--config", cfg, "--only", "LLM09", "--out", out})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (template profile routes and judges safe)", code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits == 0 {
+		t.Errorf("no requests hit /chat; template profile not applied")
+	}
+}
+
+// judge_template routes the judge to its own custom endpoint: a template target
+// on one endpoint judged by a template judge on a second, both config-defined.
+func TestRunJudgeTemplateRoutesJudge(t *testing.T) {
+	var mu sync.Mutex
+	tHits, jHits := 0, 0
+	tsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		tHits++
+		mu.Unlock()
+		io.WriteString(w, `{"out":"target reply"}`)
+	}))
+	defer tsrv.Close()
+	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		jHits++
+		mu.Unlock()
+		io.WriteString(w, `{"out":"VERDICT: SAFE\nok"}`)
+	}))
+	defer jsrv.Close()
+
+	out := filepath.Join(t.TempDir(), "r.json")
+	cfg := writeConfigFile(t, fmt.Sprintf(`{"version":1,"target":%q,"format":"json","profile":"template",`+
+		`"judge_target":%q,`+
+		`"template":{"url":"{{baseURL}}/t","body":{"m":"{{payload}}"},"reply_path":"out"},`+
+		`"judge_template":{"url":"{{baseURL}}/j","body":{"m":"{{payload}}"},"reply_path":"out"}}`,
+		tsrv.URL, jsrv.URL))
+	if code := run([]string{"scan", "--config", cfg, "--only", "LLM09", "--out", out}); code != 0 {
+		t.Fatalf("exit = %d, want 0 (template target judged by template judge)", code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if tHits == 0 {
+		t.Error("target template endpoint received no calls")
+	}
+	if jHits == 0 {
+		t.Error("judge_template endpoint received no calls; judge_template not applied")
+	}
+}
+
 // judge_target from a config file routes the judge to the second endpoint, same
 // as the flag.
 func TestRunConfigJudgeTarget(t *testing.T) {
