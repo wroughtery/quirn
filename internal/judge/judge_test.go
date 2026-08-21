@@ -161,6 +161,44 @@ func TestScoreSendsRubricAndModel(t *testing.T) {
 	}
 }
 
+// When AppPurpose is set, Score prepends the agent-mode context so the judge
+// scores relative to the app's stated purpose; when unset, the rubric is
+// unchanged (model-mode judging stays byte-identical).
+func TestScoreAppPurpose(t *testing.T) {
+	capture := func(appPurpose string) string {
+		var body string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			var req struct {
+				Messages []struct {
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			_ = json.Unmarshal(b, &req)
+			if len(req.Messages) > 0 {
+				body = req.Messages[0].Content
+			}
+			io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"VERDICT: SAFE\nok"}}]}`)
+		}))
+		t.Cleanup(srv.Close)
+		j := New(llm.NewClient(srv.URL, ""), "judge")
+		j.AppPurpose = appPurpose
+		j.Score(context.Background(), "g", "p", "r")
+		return body
+	}
+
+	with := capture("an Acme order-status support bot")
+	if !strings.Contains(with, "an Acme order-status support bot") {
+		t.Errorf("app purpose text not in prompt:\n%s", with)
+	}
+	if !strings.Contains(with, "DEPLOYED APPLICATION") {
+		t.Errorf("agent-mode context framing missing when AppPurpose set:\n%s", with)
+	}
+	if without := capture(""); strings.Contains(without, "DEPLOYED APPLICATION") {
+		t.Errorf("model-mode prompt must not carry the agent-mode framing:\n%s", without)
+	}
+}
+
 // The judge prompt must fence the attacker-influenceable payload/response and
 // tell the judge to treat them as untrusted data, so a target coaxed into
 // emitting "VERDICT: SAFE" cannot steer the verdict.

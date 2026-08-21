@@ -42,6 +42,7 @@ Flags:
   --profile string        Target API shape: openai|anthropic|gemini|azure|template (default openai; template needs --config)
   --judge-profile string  Judge API shape (same options; default: same as --profile)
   --azure-api-version str api-version for --profile azure (default 2024-10-21)
+  --app-purpose string    Stated purpose of the deployed app under test; handed to the judge (agent mode)
   --fail-on string        Minimum severity that fails the build: low|medium|high|critical (default "high")
   --fail-on-inconclusive  Also fail the build if any probe could not reach a verdict
   --format string         Report format: sarif|json|text|markdown (default "text"; "md" is an alias for "markdown")
@@ -116,6 +117,7 @@ func runScan(args []string) int {
 	profileFlag := fs.String("profile", "", "Target API profile: openai|anthropic|gemini|azure|template (default openai)")
 	judgeProfileFlag := fs.String("judge-profile", "", "Judge API profile (default: same as --profile)")
 	azureAPIVersion := fs.String("azure-api-version", "", "api-version for the azure profile (default 2024-10-21)")
+	appPurpose := fs.String("app-purpose", "", "Stated purpose of the deployed app under test; handed to the judge to tell a real break from on-task behavior")
 	failOn := fs.String("fail-on", "high", "Minimum severity that fails the build: low|medium|high|critical")
 	failOnInconclusive := fs.Bool("fail-on-inconclusive", false, "Also fail if any probe could not reach a verdict")
 	format := fs.String("format", "text", "Report format: sarif|json|text|markdown")
@@ -177,6 +179,7 @@ func runScan(args []string) int {
 		applyStr("profile", profileFlag, conf.Profile)
 		applyStr("judge-profile", judgeProfileFlag, conf.JudgeProfile)
 		applyStr("azure-api-version", azureAPIVersion, conf.AzureAPIVersion)
+		applyStr("app-purpose", appPurpose, conf.AppPurpose)
 		applyStr("fail-on", failOn, conf.FailOn)
 		applyStr("format", format, conf.Format)
 		applyStr("baseline", baselinePath, conf.Baseline)
@@ -331,6 +334,7 @@ func runScan(args []string) int {
 		Target:     *target,
 		Model:      *model,
 		JudgeModel: *judgeModel,
+		AppPurpose: *appPurpose,
 	}
 
 	// A judge key only matters with a separate judge endpoint; flag it if given

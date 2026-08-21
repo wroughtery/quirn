@@ -19,6 +19,11 @@ type Config struct {
 	// JudgeModel is the model name used to judge whether an attack
 	// succeeded. May be empty if judging is not yet implemented for a probe.
 	JudgeModel string
+	// AppPurpose, when non-empty, is the stated purpose of the deployed
+	// application under test. It is handed to the judge so it can tell a genuine
+	// policy break from normal on-task behavior. Empty in model-mode, which keeps
+	// judging byte-identical.
+	AppPurpose string
 	// JudgeClient, when non-nil, is a separate llm.Client used only for judge
 	// calls, so the judge can live on a different endpoint/key than the target
 	// (e.g. a cheap local target judged by a capable hosted model). When nil the

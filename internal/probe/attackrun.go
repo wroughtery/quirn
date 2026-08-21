@@ -48,6 +48,7 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 		judgeClient = client
 	}
 	j := judge.New(judgeClient, cfg.JudgeModel)
+	j.AppPurpose = cfg.AppPurpose
 	obs := cfg.Observer
 
 	live.Emit(obs, live.Event{

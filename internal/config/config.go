@@ -43,21 +43,24 @@ type File struct {
 	// JudgeTemplate carry the generic http-template definition used when the
 	// matching profile is "template"; they are raw JSON validated by the llm
 	// package when the provider is built (see internal/llm TemplateConfig).
-	Profile            string          `json:"profile"`
-	JudgeProfile       string          `json:"judge_profile"`
-	Template           json.RawMessage `json:"template"`
-	JudgeTemplate      json.RawMessage `json:"judge_template"`
-	AzureAPIVersion    string          `json:"azure_api_version"`
-	FailOn             string          `json:"fail_on"`
-	FailOnInconclusive *bool           `json:"fail_on_inconclusive"`
-	Format             string          `json:"format"`
-	Concurrency        *int            `json:"concurrency"`
-	Timeout            string          `json:"timeout"`
-	MaxRetries         *int            `json:"max_retries"`
-	RequestTimeout     string          `json:"request_timeout"`
-	Only               []string        `json:"only"`
-	Skip               []string        `json:"skip"`
-	Baseline           string          `json:"baseline"`
+	Profile         string          `json:"profile"`
+	JudgeProfile    string          `json:"judge_profile"`
+	Template        json.RawMessage `json:"template"`
+	JudgeTemplate   json.RawMessage `json:"judge_template"`
+	AzureAPIVersion string          `json:"azure_api_version"`
+	// AppPurpose is the stated purpose of the deployed app under test, handed to
+	// the judge (agent mode) so it scores a break relative to that purpose.
+	AppPurpose         string   `json:"app_purpose"`
+	FailOn             string   `json:"fail_on"`
+	FailOnInconclusive *bool    `json:"fail_on_inconclusive"`
+	Format             string   `json:"format"`
+	Concurrency        *int     `json:"concurrency"`
+	Timeout            string   `json:"timeout"`
+	MaxRetries         *int     `json:"max_retries"`
+	RequestTimeout     string   `json:"request_timeout"`
+	Only               []string `json:"only"`
+	Skip               []string `json:"skip"`
+	Baseline           string   `json:"baseline"`
 	// Severities overrides the reported severity of a probe, keyed by probe ID,
 	// e.g. {"prompt-injection": "critical"}. Values must be a valid severity.
 	Severities map[string]string `json:"severities"`
