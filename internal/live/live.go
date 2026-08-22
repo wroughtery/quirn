@@ -55,6 +55,14 @@ type Event struct {
 	// (attack_response). Live-view only; never enters a report.
 	LatencyMS int64 `json:"latencyMs,omitempty"`
 
+	// Turn is the 1-based index of the user turn within a multi-turn attack and
+	// TurnCount the total number of turns. Both are set only for multi-turn
+	// attacks (TurnCount > 1); single-turn events leave them zero so they stay
+	// byte-identical. They let the live view keep each turn's payload/reply
+	// distinct instead of overwriting one row. Live-view only.
+	Turn      int `json:"turn,omitempty"`
+	TurnCount int `json:"turnCount,omitempty"`
+
 	// Seq is a monotonic sequence number assigned by the dashboard Hub so a
 	// browser can order and de-duplicate replayed backlog against the live
 	// stream. Emitters leave it zero.

@@ -51,6 +51,10 @@ type File struct {
 	// AppPurpose is the stated purpose of the deployed app under test, handed to
 	// the judge (agent mode) so it scores a break relative to that purpose.
 	AppPurpose string `json:"app_purpose"`
+	// IndirectNonce, when set, enables the indirect prompt-injection probe (LLM01
+	// via RAG/tools). It must match the nonce used with `quirn canary` to generate
+	// the seeded document. Empty (the default) omits the probe.
+	IndirectNonce string `json:"indirect_nonce"`
 	// AgentMode, when set, tests the deployed app rather than a bare model:
 	// synthetic system prompts are suppressed and canary-dependent probes use
 	// app-relative signals. Pointer so an absent key is distinct from false.
@@ -89,7 +93,11 @@ type CustomAttack struct {
 	Name    string `json:"name"`    // optional label shown in evidence
 	Goal    string `json:"goal"`    // required: what the judge treats as success
 	System  string `json:"system"`  // optional system message
-	Payload string `json:"payload"` // required: the user turn sent to the target
+	Payload string `json:"payload"` // required: the first user turn sent to the target
+	// Followups are optional additional user turns, making this a multi-turn
+	// attack: each is sent after the target's prior reply is appended, so the
+	// conversation escalates. The final reply is judged.
+	Followups []string `json:"followups"`
 }
 
 // Load reads and statically validates the JSON config at path. Unknown keys are
@@ -172,6 +180,11 @@ func (f *File) validate() error {
 		for j, a := range cp.Attacks {
 			if strings.TrimSpace(a.Goal) == "" || strings.TrimSpace(a.Payload) == "" {
 				return fmt.Errorf("custom_probes[%q].attacks[%d]: goal and payload are required", cp.ID, j)
+			}
+			for k, f := range a.Followups {
+				if strings.TrimSpace(f) == "" {
+					return fmt.Errorf("custom_probes[%q].attacks[%d].followups[%d]: a follow-up turn must not be empty", cp.ID, j, k)
+				}
 			}
 		}
 	}

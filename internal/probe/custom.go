@@ -11,10 +11,11 @@ import (
 // config file's custom_probes) can define their own payloads without depending
 // on probe internals.
 type Attack struct {
-	Name    string // short label shown in evidence
-	Goal    string // handed to the judge: what success looks like
-	System  string // optional system message establishing app context
-	Payload string // the user turn sent to the target
+	Name      string   // short label shown in evidence
+	Goal      string   // handed to the judge: what success looks like
+	System    string   // optional system message establishing app context
+	Payload   string   // the first user turn sent to the target
+	Followups []string // optional additional user turns (multi-turn attack)
 }
 
 // customProbe is a probe assembled from externally-supplied attacks. It carries
@@ -36,7 +37,7 @@ type customProbe struct {
 func NewCustom(id, name, owasp, severity string, attacks []Attack) Probe {
 	internal := make([]attack, len(attacks))
 	for i, a := range attacks {
-		internal[i] = attack{name: a.Name, goal: a.Goal, system: a.System, payload: a.Payload}
+		internal[i] = attack{name: a.Name, goal: a.Goal, system: a.System, payload: a.Payload, followups: a.Followups}
 	}
 	return customProbe{id: id, name: name, owasp: owasp, severity: severity, attacks: internal}
 }

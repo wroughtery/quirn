@@ -116,11 +116,31 @@ session variety.
 
 ---
 
-## Phase 3 — Agent-only attack surface  *(frontier; roadmap)*
+## Phase 3 — Agent-only attack surface  *(SHIPPED 2026-08-21)*
 
-**Goal.** The vulnerabilities that only exist in the deployed agent.
+**Status: done.** Full design in `PHASE-3-DESIGN.md`. Three additive
+capabilities, each labelling **proxy** vs **confirmed**:
+- **Multi-turn attacks** — `attack` carries follow-up user turns; `runAttacks`
+  escalates within one conversation (each reply fed back) and judges the final
+  reply. Built-in agent-mode crescendo (injection `spoofed-policy-update`) +
+  custom-probe `followups` config. Model-mode byte-identical (single-turn path
+  unchanged). Foundation, no app cooperation.
+- **Indirect prompt injection (LLM01/LLM05)** — `quirn canary --nonce X` emits a
+  seed doc; the operator plants it; `scan --indirect-nonce X` triggers retrieval
+  and **confirms** deterministically when the target echoes `INDIRECT-INJECTED-X`
+  (judge is a fallback). Opt-in probe (`internal/probe/indirect.go`), off unless
+  the nonce is passed.
+- **Confirmed excessive agency (LLM06)** — `internal/honeytool` loopback listener;
+  `--agent-honeytool` points the agency probe's tool surface at it and a real hit
+  is a **confirmed** unauthorized invocation (deterministic, judge-free), attacks
+  echo a per-attack nonce for attribution. No hit ⇒ today's judge proxy path.
+- Shared mechanism: an optional `confirm` closure on `attack` (a deterministic
+  signal that beats the judge). Honeytool is loopback-only. Unit-tested across
+  all three (multi-turn ordering/inconclusive, canary/confirmer, honeytool
+  confirm-vs-proxy, CLI wiring). **Live validation pending** (needs a real
+  tool-using RAG agent — the operator-run acceptance script is in the design doc).
 
-**In scope (to be detailed much later).**
+**Was in scope (to be detailed much later).**
 - **Indirect injection via RAG/tools** — "bring-your-own-context" flow: quirn emits a
   canary document the user seeds into the agent's knowledge base/tool, then queries
   the agent to trigger retrieval and checks for compliance. This is the real-world

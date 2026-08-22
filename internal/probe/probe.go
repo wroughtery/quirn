@@ -5,6 +5,7 @@ package probe
 import (
 	"context"
 
+	"quirn/internal/honeytool"
 	"quirn/internal/live"
 	"quirn/internal/llm"
 )
@@ -29,6 +30,11 @@ type Config struct {
 	// its own) and canary-dependent probes switch to app-relative success signals.
 	// False (the default) preserves model-mode behavior exactly.
 	AgentMode bool
+	// Honeytool, when non-nil, is a running loopback listener the excessive-agency
+	// probe (LLM06) uses to CONFIRM that the agent actually invoked a dangerous
+	// tool (a recorded hit), rather than only inferring intent from the reply text.
+	// Nil (the default) keeps LLM06 on its judge-only proxy path, byte-identical.
+	Honeytool *honeytool.Recorder
 	// JudgeClient, when non-nil, is a separate llm.Client used only for judge
 	// calls, so the judge can live on a different endpoint/key than the target
 	// (e.g. a cheap local target judged by a capable hosted model). When nil the

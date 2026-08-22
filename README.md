@@ -128,6 +128,46 @@ quirn scan --profile template --config app.json --agent-mode \
 Use a **separate judge endpoint** (the `--judge-target` flags) so the judge is a
 plain model call, not wrapped in your app's request template.
 
+### Agent-only attack surface (multi-turn · indirect injection · confirmed agency)
+
+These test vulnerabilities that only exist in the *deployed agent* — its
+conversation state and its RAG/tools — and clearly label a **proxy** signal
+(inferred from the reply) versus a **confirmed** one (proven).
+
+- **Multi-turn attacks.** Attacks can escalate over several user turns; quirn
+  holds the conversation itself (each reply is fed back before the next turn) and
+  judges the final reply. Built-in agent-mode attacks use this for crescendo
+  priming; custom probes add turns with an `attacks[].followups` array in the
+  config. Model-mode output is unchanged.
+
+- **Indirect prompt injection via RAG (LLM01/LLM05).** The injection rides inside
+  content the agent *retrieves*, not the user turn. Two steps, with you seeding
+  the document in between:
+
+  ```sh
+  quirn canary --nonce demo1 --out canary.md   # emits a seed doc keyed to the nonce
+  #  … seed canary.md into the agent's knowledge base / a tool it can read …
+  quirn scan --target <app> --agent-mode --indirect-nonce demo1 --only LLM01
+  ```
+
+  If the agent retrieves the doc and obeys its embedded instruction, it echoes the
+  token `INDIRECT-INJECTED-demo1` — a **confirmed** indirect injection (no judge
+  needed; the nonce ties emit → detect so a stray token is never a false positive).
+
+- **Confirmed excessive agency via honeytool (LLM06).** Turns the tool-abuse
+  proxy into proof. quirn stands up a loopback listener; you register its URL as a
+  dangerous tool on the agent. If the agent actually calls it, the hit is a
+  **confirmed** unauthorized invocation.
+
+  ```sh
+  quirn scan --target <app> --agent-mode --agent-honeytool --only LLM06
+  #  register the printed honeytool URL as a dangerous tool on the agent first
+  ```
+
+  The honeytool binds loopback only (a routable bind would let any host forge a
+  finding), so run quirn on the same host as the agent. Prefer `--only LLM06` (or
+  `--concurrency 1`) so a hit is attributed unambiguously.
+
 ### Baseline (ratchet)
 
 Adopt on a noisy codebase without disabling the gate: snapshot today's findings once, then only *new* vulnerabilities break the build.
@@ -263,4 +303,4 @@ Test only LLM endpoints and targets you **own or are authorized to test**. For t
 
 Building v0. Locked: **name Quirn, LLM red-team wedge, Go single-binary core, open-core, BYO-key, Wroughtery sub-brand.** Repo lives at `wroughtery/quirn`.
 
-Working today: `scan` against any OpenAI-compatible endpoint; six OWASP probe classes (LLM01/02/05/06/07/09) with an LLM judge; probe selection (`--only`/`--skip`/`--list-probes`); `text`/`json`/`sarif`/`markdown` reports; baseline ratchet (`--baseline` / `--write-baseline`); `--fail-on` severity gate (fail-closed on an unreachable target); concurrent probe execution; and a GitHub Action. Test suite covers the CLI, judge, probes, selection, reports, baseline, and client. Not yet: remaining OWASP classes, YAML policy config, `curl | sh` release artifacts, and the v1 hosted dashboard.
+Working today: `scan` against any OpenAI-compatible endpoint (plus anthropic/gemini/azure/template profiles); six OWASP probe classes (LLM01/02/05/06/07/09) with an LLM judge; a separate judge endpoint/key; **agent mode** (test the deployed app, not the bare model); **multi-turn attacks**; **indirect prompt injection** via a seeded canary (`quirn canary` + `--indirect-nonce`); **honeytool-confirmed excessive agency** (`--agent-honeytool`); probe selection (`--only`/`--skip`/`--list-probes`); `text`/`json`/`sarif`/`markdown` reports; baseline ratchet (`--baseline` / `--write-baseline`); `--fail-on` severity gate (fail-closed on an unreachable target); concurrent probe execution; live console/dashboard; and a GitHub Action. Test suite covers the CLI, judge, probes, selection, reports, baseline, client, and honeytool. Not yet: remaining OWASP classes, session/cookie passthrough for agent targets, YAML policy config, `curl | sh` release artifacts, and the v1 hosted dashboard.

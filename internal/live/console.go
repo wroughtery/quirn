@@ -32,13 +32,13 @@ func (c *Console) Handle(e Event) {
 	case KindProbeStart:
 		fmt.Fprintf(c.w, "\n▶ %s %s — %s\n", e.OWASP, e.ProbeID, e.Name)
 	case KindAttackStart:
-		fmt.Fprintf(c.w, "  → [%s] send: %s\n", e.Attack, oneLine(e.Payload))
+		fmt.Fprintf(c.w, "  → [%s] send: %s\n", attackLabel(e), oneLine(e.Payload))
 	case KindAttackResponse:
 		if e.Error != "" {
-			fmt.Fprintf(c.w, "  ✗ [%s] call failed after %s: %s\n", e.Attack, dur(e.LatencyMS), oneLine(e.Error))
+			fmt.Fprintf(c.w, "  ✗ [%s] call failed after %s: %s\n", attackLabel(e), dur(e.LatencyMS), oneLine(e.Error))
 			return
 		}
-		fmt.Fprintf(c.w, "  ← [%s] reply (%s): %s\n", e.Attack, dur(e.LatencyMS), oneLine(e.Reply))
+		fmt.Fprintf(c.w, "  ← [%s] reply (%s): %s\n", attackLabel(e), dur(e.LatencyMS), oneLine(e.Reply))
 	case KindAttackVerdict:
 		fmt.Fprintf(c.w, "  %s [%s] %s — %s\n", verdictGlyph(e.Verdict), e.Attack, strings.ToUpper(e.Verdict), oneLine(e.Reason))
 	case KindProbeFinish:
@@ -52,6 +52,16 @@ func (c *Console) Handle(e Event) {
 	case KindScanStopped:
 		fmt.Fprintf(c.w, "\n■ scan stopped by user\n")
 	}
+}
+
+// attackLabel names an attack in the console log, appending the turn position
+// for a multi-turn attack (e.g. "spoofed-policy-update 2/2") so each turn is
+// distinguishable. Single-turn events (TurnCount 0) render just the name.
+func attackLabel(e Event) string {
+	if e.TurnCount > 1 {
+		return fmt.Sprintf("%s %d/%d", e.Attack, e.Turn, e.TurnCount)
+	}
+	return e.Attack
 }
 
 // verdictGlyph maps a verdict string to a leading marker.

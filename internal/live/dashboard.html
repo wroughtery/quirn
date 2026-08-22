@@ -130,19 +130,27 @@
       '<span class="badge b-pending" data-badge>running</span></div>' +
       '<div class="attacks" data-attacks></div>';
     main.appendChild(el);
-    p = { el, badge: el.querySelector("[data-badge]"), attacks: new Map(), attacksEl: el.querySelector("[data-attacks]") };
+    p = { el, badge: el.querySelector("[data-badge]"), attacks: new Map(), lastByName: new Map(), attacksEl: el.querySelector("[data-attacks]") };
     probes.set(e.probeId, p);
     return p;
   }
 
-  function ensureAttack(p, name) {
-    let a = p.attacks.get(name);
-    if (a) return a;
+  // A multi-turn attack (turnCount > 1) gets one row per turn so each turn's
+  // payload and reply stay distinct instead of overwriting a single row.
+  function attackKey(e) {
+    return e.turnCount > 1 ? e.attack + "#" + e.turn : e.attack;
+  }
+
+  function ensureAttack(p, e) {
+    const key = attackKey(e);
+    let a = p.attacks.get(key);
+    if (a) { p.lastByName.set(e.attack, a); return a; }
+    const label = e.turnCount > 1 ? (e.attack + " (turn " + e.turn + "/" + e.turnCount + ")") : e.attack;
     const el = document.createElement("div");
     el.className = "attack";
     el.innerHTML =
       '<div class="row"><span class="caret">▸</span>' +
-      '<span class="aname">' + esc(name) + '</span>' +
+      '<span class="aname">' + esc(label) + '</span>' +
       '<span class="lat" data-lat></span>' +
       '<span class="vbadge v-pending" data-v>pending</span></div>' +
       '<div class="detail">' +
@@ -154,7 +162,8 @@
     el.querySelector(".row").addEventListener("click", () => el.classList.toggle("open"));
     p.attacksEl.appendChild(el);
     a = { el };
-    p.attacks.set(name, a);
+    p.attacks.set(key, a);
+    p.lastByName.set(e.attack, a);
     return a;
   }
 
@@ -167,19 +176,22 @@
     switch (e.kind) {
       case "probe_start": ensureProbe(e); break;
       case "attack_start": {
-        const a = ensureAttack(ensureProbe(e), e.attack);
+        const a = ensureAttack(ensureProbe(e), e);
         a.el.querySelector("[data-goal]").textContent = e.goal || "";
         a.el.querySelector("[data-payload]").textContent = e.payload || "";
         break;
       }
       case "attack_response": {
-        const a = ensureAttack(ensureProbe(e), e.attack);
+        const a = ensureAttack(ensureProbe(e), e);
         if (e.latencyMs) a.el.querySelector("[data-lat]").textContent = (e.latencyMs / 1000).toFixed(1) + "s";
         a.el.querySelector("[data-reply]").textContent = e.error ? ("[error] " + e.error) : (e.reply || "");
         break;
       }
       case "attack_verdict": {
-        const a = ensureAttack(ensureProbe(e), e.attack);
+        // The verdict is emitted once per attack (no turn), so it lands on the
+        // attack's most recent row (the final turn of a multi-turn attack).
+        const p = ensureProbe(e);
+        const a = p.lastByName.get(e.attack) || ensureAttack(p, e);
         setVerdict(a.el.querySelector("[data-v]"), e.verdict);
         a.el.querySelector("[data-reason]").textContent = e.reason || "";
         break;

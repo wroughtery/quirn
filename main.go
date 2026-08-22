@@ -18,6 +18,7 @@ import (
 
 	"quirn/internal/baseline"
 	"quirn/internal/config"
+	"quirn/internal/honeytool"
 	"quirn/internal/live"
 	"quirn/internal/llm"
 	"quirn/internal/probe"
@@ -29,6 +30,7 @@ const helpText = `quirn - LLM red-team CLI (OWASP LLM Top 10)
 
 Usage:
   quirn scan --target <url> [flags]
+  quirn canary --nonce <value> [--out doc.md]
   quirn version
   quirn help
 
@@ -44,6 +46,9 @@ Flags:
   --azure-api-version str api-version for --profile azure (default 2024-10-21)
   --app-purpose string    Stated purpose of the deployed app under test; handed to the judge (agent mode)
   --agent-mode            Test the deployed app, not a bare model: suppress synthetic system prompts, use app-relative signals
+  --indirect-nonce string Enable the indirect prompt-injection probe (LLM01 via RAG): reuse the nonce from "quirn canary"
+  --agent-honeytool       Confirm excessive agency (LLM06) via a loopback honeytool the agent's dangerous tool points at
+  --agent-honeytool-addr  Loopback address for the honeytool listener (default "127.0.0.1:8898")
   --fail-on string        Minimum severity that fails the build: low|medium|high|critical (default "high")
   --fail-on-inconclusive  Also fail the build if any probe could not reach a verdict
   --format string         Report format: sarif|json|text|markdown (default "text"; "md" is an alias for "markdown")
@@ -72,6 +77,9 @@ Examples:
   quirn scan --target http://localhost:1234 --model qwen3-8b --judge-target https://api.openai.com --judge-model gpt-4o --judge-api-key $OPENAI_KEY
   quirn scan --target https://api.anthropic.com --model claude-sonnet-4 --profile anthropic --api-key $ANTHROPIC_KEY
   quirn scan --config quirn.json   # --profile template: describe any custom JSON API in the config
+  quirn canary --nonce demo1 --out canary.md   # seed doc for indirect injection, then:
+  quirn scan --target <app> --agent-mode --indirect-nonce demo1   # after seeding canary.md into the app's RAG
+  quirn scan --target <app> --agent-mode --agent-honeytool --only LLM06   # register the printed URL as a dangerous tool
 `
 
 // version is the tool version, overridable at build time with
@@ -93,6 +101,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "scan":
 		return runScan(args[1:])
+	case "canary":
+		return runCanary(args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("quirn %s\n", version)
 		return 0
@@ -120,6 +130,9 @@ func runScan(args []string) int {
 	azureAPIVersion := fs.String("azure-api-version", "", "api-version for the azure profile (default 2024-10-21)")
 	appPurpose := fs.String("app-purpose", "", "Stated purpose of the deployed app under test; handed to the judge to tell a real break from on-task behavior")
 	agentMode := fs.Bool("agent-mode", false, "Test the deployed app, not a bare model: suppress quirn's synthetic system prompts and use app-relative success signals")
+	indirectNonce := fs.String("indirect-nonce", "", "Enable the indirect prompt-injection probe (LLM01 via RAG); reuse the nonce from \"quirn canary\" after seeding the doc")
+	agentHoneytool := fs.Bool("agent-honeytool", false, "Confirm excessive agency (LLM06) via a loopback honeytool the agent's dangerous tool is pointed at")
+	agentHoneytoolAddr := fs.String("agent-honeytool-addr", honeytool.DefaultAddr, "Loopback address for the honeytool listener")
 	failOn := fs.String("fail-on", "high", "Minimum severity that fails the build: low|medium|high|critical")
 	failOnInconclusive := fs.Bool("fail-on-inconclusive", false, "Also fail if any probe could not reach a verdict")
 	format := fs.String("format", "text", "Report format: sarif|json|text|markdown")
@@ -182,6 +195,7 @@ func runScan(args []string) int {
 		applyStr("judge-profile", judgeProfileFlag, conf.JudgeProfile)
 		applyStr("azure-api-version", azureAPIVersion, conf.AzureAPIVersion)
 		applyStr("app-purpose", appPurpose, conf.AppPurpose)
+		applyStr("indirect-nonce", indirectNonce, conf.IndirectNonce)
 		applyStr("fail-on", failOn, conf.FailOn)
 		applyStr("format", format, conf.Format)
 		applyStr("baseline", baselinePath, conf.Baseline)
@@ -271,6 +285,27 @@ func runScan(args []string) int {
 		}
 	}
 
+	// The indirect prompt-injection probe (LLM01 via RAG) is opt-in: it runs only
+	// when --indirect-nonce is given, because it needs the operator to have seeded
+	// the matching canary document out of band. Added unconditionally (like custom
+	// probes, not filtered by --only/--skip) so the explicit nonce is honored.
+	extraIDs := customIDs
+	if n := strings.TrimSpace(*indirectNonce); n != "" {
+		if !validNonce(n) {
+			fmt.Fprintf(os.Stderr, "quirn: --indirect-nonce %q must be non-empty and contain only letters, digits, '.', '_' or '-'\n", n)
+			return 2
+		}
+		indirectID := probe.NewIndirectProbe(n).ID()
+		for _, id := range customIDs {
+			if id == indirectID {
+				fmt.Fprintf(os.Stderr, "quirn: custom probe id %q collides with the built-in indirect-injection probe\n", indirectID)
+				return 2
+			}
+		}
+		probes = append(probes, probe.NewIndirectProbe(n))
+		extraIDs = append(append([]string(nil), customIDs...), indirectID)
+	}
+
 	if len(probes) == 0 {
 		fmt.Fprintln(os.Stderr, "quirn: no probes selected (check --only/--skip or custom_probes)")
 		return 2
@@ -280,7 +315,7 @@ func runScan(args []string) int {
 	// built-in nor a defined custom probe) is almost certainly a typo; fail
 	// loudly rather than silently ignoring it.
 	if conf != nil {
-		if unknown := unknownProbeIDs(conf.Severities, customIDs); len(unknown) > 0 {
+		if unknown := unknownProbeIDs(conf.Severities, extraIDs); len(unknown) > 0 {
 			fmt.Fprintf(os.Stderr, "quirn: config severities reference unknown probe id(s): %s\n", strings.Join(unknown, ", "))
 			return 2
 		}
@@ -341,6 +376,25 @@ func runScan(args []string) int {
 		JudgeModel: *judgeModel,
 		AppPurpose: *appPurpose,
 		AgentMode:  *agentMode,
+	}
+
+	// A loopback honeytool upgrades the excessive-agency probe (LLM06) from a
+	// judge-only proxy to a CONFIRMED signal: the operator registers the printed
+	// URL as a dangerous tool on the agent, and a real call landing here proves the
+	// agent acted. Off by default (no listener, byte-identical). Meaningful only in
+	// agent mode against a tool-using app; a bare model cannot make outbound calls.
+	if *agentHoneytool {
+		if !*agentMode {
+			fmt.Fprintln(os.Stderr, "quirn: --agent-honeytool has no effect without --agent-mode (a bare model cannot call tools); the honeytool only confirms a real tool-using agent")
+		}
+		rec, err := honeytool.Start(*agentHoneytoolAddr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+			return 2
+		}
+		defer rec.Close()
+		cfg.Honeytool = rec
+		fmt.Fprintf(os.Stderr, "quirn: honeytool listening at %s — register this URL as a dangerous tool (e.g. delete_database) on the agent before scanning; a real call CONFIRMS excessive agency. Prefer --only LLM06 (or --concurrency 1) for unambiguous attribution.\n", rec.URL())
 	}
 
 	// A judge key only matters with a separate judge endpoint; flag it if given
@@ -516,6 +570,60 @@ func runScan(args []string) int {
 	return finish(0)
 }
 
+// runCanary implements `quirn canary`: it prints (or writes) the seed document an
+// operator plants in the agent's knowledge base to test indirect prompt injection
+// (see probe.CanaryDocument). The nonce ties this document to a later
+// `scan --indirect-nonce <nonce>`.
+func runCanary(args []string) int {
+	fs := flag.NewFlagSet("canary", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	nonce := fs.String("nonce", "", "Reference nonce tying the seed doc to the scan (required; reuse with scan --indirect-nonce)")
+	out := fs.String("out", "", "Write the canary document to this path (default: stdout)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	n := strings.TrimSpace(*nonce)
+	if n == "" {
+		fmt.Fprintln(os.Stderr, "quirn: canary requires --nonce <value> (reuse the same value with scan --indirect-nonce)")
+		return 2
+	}
+	if !validNonce(n) {
+		fmt.Fprintf(os.Stderr, "quirn: --nonce %q must contain only letters, digits, '.', '_' or '-'\n", n)
+		return 2
+	}
+
+	w, closeOut, err := openOutput(*out)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "quirn: %v\n", err)
+		return 1
+	}
+	defer closeOut()
+
+	fmt.Fprint(w, probe.CanaryDocument(n))
+	if *out != "" {
+		fmt.Fprintf(os.Stderr, "quirn: wrote canary document to %q — seed it into the agent's knowledge base, then run: quirn scan --target <app> --agent-mode --indirect-nonce %s\n", *out, n)
+	}
+	return 0
+}
+
+// validNonce reports whether s is a safe indirect-injection nonce: non-empty and
+// restricted to letters, digits, and '.', '_', '-'. This keeps the nonce clean
+// inside the canary token, the seeded document, and the trigger query.
+func validNonce(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // splitList splits a comma-separated flag value into trimmed, non-empty tokens.
 func splitList(s string) []string {
 	if strings.TrimSpace(s) == "" {
@@ -603,7 +711,7 @@ func buildCustomProbe(cp config.CustomProbe) probe.Probe {
 		if nm == "" {
 			nm = fmt.Sprintf("attack-%d", i+1)
 		}
-		atks[i] = probe.Attack{Name: nm, Goal: a.Goal, System: a.System, Payload: a.Payload}
+		atks[i] = probe.Attack{Name: nm, Goal: a.Goal, System: a.System, Payload: a.Payload, Followups: a.Followups}
 	}
 	return probe.NewCustom(cp.ID, name, owasp, cp.Severity, atks)
 }
