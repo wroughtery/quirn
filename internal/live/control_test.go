@@ -116,17 +116,30 @@ func TestGateWaitNilIsNoOp(t *testing.T) {
 
 func TestConcurrentPauseResumeWaitNoDeadlock(t *testing.T) {
 	c := NewController(nil)
-	var wg sync.WaitGroup
+	// Race Pause/Resume/Wait against each other to shake out lock ordering and
+	// channel-lifecycle bugs under -race. The Pause/Resume mutators and the Wait
+	// blockers are tracked separately: pooled Pause/Resume run in arbitrary order,
+	// so the gate may end closed. We therefore barrier on the mutators first, then
+	// issue ONE final Resume that is ordered after every Pause — that guarantees
+	// the gate ends open, so every blocked Wait is guaranteed to unblock. Joining
+	// the Waiters before that final Resume could deadlock legitimately (a Pause
+	// scheduled last would leave the gate shut with no Resume to follow).
+	var mutators, waiters sync.WaitGroup
 	for i := 0; i < 50; i++ {
-		wg.Add(3)
-		go func() { defer wg.Done(); c.Pause() }()
-		go func() { defer wg.Done(); c.Resume() }()
-		go func() { defer wg.Done(); _ = c.Wait(context.Background()) }()
+		mutators.Add(2)
+		go func() { defer mutators.Done(); c.Pause() }()
+		go func() { defer mutators.Done(); c.Resume() }()
+		waiters.Add(1)
+		go func() { defer waiters.Done(); _ = c.Wait(context.Background()) }()
 	}
-	// Ensure the scan can always make progress at the end.
+	// Barrier: no further Pause can run past this point.
+	mutators.Wait()
+	// Ordered after every Pause, so the gate is definitively open and stays open;
+	// all blocked Wait calls now observe paused=false and return.
 	c.Resume()
+
 	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
+	go func() { waiters.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

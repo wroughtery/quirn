@@ -133,6 +133,28 @@ func TestMultiTurnSendsTurnsInOrder(t *testing.T) {
 	}
 }
 
+// A custom probe escalates through ALL its turns in agent mode too — the mode
+// whose entire purpose is testing a deployed agent, where multi-turn crescendo
+// matters most. Regression guard: custom Followups used to apply only in model
+// mode (agent mode reads agentFollowups), so an agent-mode custom probe was
+// silently single-turned. NewCustom now mirrors Followups into agentFollowups.
+func TestCustomMultiTurnRunsInAgentMode(t *testing.T) {
+	ts, c := newTurnServer(t, "SAFE", "")
+	multiTurnProbe().Run(context.Background(), c, Config{Model: "m", JudgeModel: "j", AgentMode: true})
+
+	calls := ts.calls()
+	if len(calls) != 3 {
+		t.Fatalf("agent-mode target calls = %d, want 3 (custom followups must escalate in agent mode)", len(calls))
+	}
+	// Agent mode suppresses any synthetic system, but the escalation is intact.
+	if got := roles(calls[2]); got != "user,assistant,user,assistant,user" {
+		t.Errorf("agent-mode call 3 roles = %q, want the full 5-message escalation", got)
+	}
+	if calls[2][4].Content != "turn-three" {
+		t.Errorf("agent-mode call 3 final user turn = %q, want turn-three", calls[2][4].Content)
+	}
+}
+
 // A single-turn attack is byte-identical to the old path: one target call, and
 // the judge payload is exactly the lone turn with no multi-turn separator.
 func TestSingleTurnUnchanged(t *testing.T) {
