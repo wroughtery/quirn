@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -162,12 +164,35 @@ type openAIResponse struct {
 // structure is re-marshaled, so an injected payload is ALWAYS correctly
 // JSON-escaped no matter what quotes/newlines/backslashes it contains — the
 // template can never be broken out of by attack text.
+//
+// {{payload}} is the conversation flattened to one string (all user turns joined),
+// which suits a single-input API. For a chat API that wants the real message
+// history — needed to test MULTI-TURN attacks against a deployed agent — use a
+// whole-string leaf "{{conversation}}": it is replaced by the actual messages
+// array ([{"role":..,"content":..}, …]), not a string, so an agent sees the
+// genuine user/assistant/user escalation.
 type TemplateConfig struct {
 	Method    string            `json:"method"`     // default POST
 	URL       string            `json:"url"`        // required; may use {{baseURL}} {{model}}
 	Headers   map[string]string `json:"headers"`    // values may use {{apiKey}} {{model}} {{baseURL}}
 	Body      json.RawMessage   `json:"body"`       // required; a JSON template
 	ReplyPath string            `json:"reply_path"` // required; dot path, e.g. choices.0.message.content
+
+	// SSE, when true, parses the response as Server-Sent Events (text/event-stream)
+	// instead of a single JSON document — the shape most deployed agents stream. Each
+	// "data:" line is decoded as JSON and the string at ReplyPath is extracted and
+	// CONCATENATED across events, reassembling a token-streamed reply. Events that
+	// lack ReplyPath (or whose value is not a string) are skipped, so keep-alives and
+	// non-text control events (step/done/error) are ignored. A "[DONE]" data line
+	// ends the stream.
+	SSE bool `json:"sse"`
+	// SSEFilterKey/SSEFilterValue, optional, restrict which SSE events contribute
+	// text: only events whose top-level JSON field SSEFilterKey stringifies to
+	// SSEFilterValue are read. E.g. for events {"type":"text","delta":"…"} set
+	// sse_filter_key="type", sse_filter_value="text" (with reply_path="delta") so
+	// only text deltas accumulate. Both must be set together or both empty.
+	SSEFilterKey   string `json:"sse_filter_key"`
+	SSEFilterValue string `json:"sse_filter_value"`
 }
 
 type templateProvider struct {
@@ -186,6 +211,12 @@ func NewTemplateProvider(cfg TemplateConfig) (Provider, error) {
 	if strings.TrimSpace(cfg.ReplyPath) == "" {
 		return nil, fmt.Errorf("template profile: reply_path is required")
 	}
+	if (cfg.SSEFilterKey == "") != (cfg.SSEFilterValue == "") {
+		return nil, fmt.Errorf("template profile: sse_filter_key and sse_filter_value must be set together")
+	}
+	if !cfg.SSE && (cfg.SSEFilterKey != "" || cfg.SSEFilterValue != "") {
+		return nil, fmt.Errorf("template profile: sse_filter_* requires sse: true")
+	}
 	var tmpl interface{}
 	if err := json.Unmarshal(cfg.Body, &tmpl); err != nil {
 		return nil, fmt.Errorf("template profile: body is not valid JSON: %w", err)
@@ -201,6 +232,13 @@ func (t *templateProvider) Name() string { return "template" }
 
 func (t *templateProvider) BuildSpec(baseURL, apiKey, model string, messages []Message) (chatSpec, error) {
 	payload, system := splitUserSystem(messages)
+	// The full message history as a JSON array, for a "{{conversation}}" leaf so a
+	// multi-turn attack reaches a chat agent as a real conversation, not a
+	// flattened blob.
+	conv := make([]interface{}, 0, len(messages))
+	for _, m := range messages {
+		conv = append(conv, map[string]interface{}{"role": m.Role, "content": m.Content})
+	}
 	// A single-pass Replacer: substituted text is never re-scanned, so an attack
 	// payload that itself contains a "{{...}}" token cannot inject another
 	// placeholder (e.g. smuggle {{model}} in via {{payload}}).
@@ -209,7 +247,7 @@ func (t *templateProvider) BuildSpec(baseURL, apiKey, model string, messages []M
 		"{{system}}", system,
 		"{{model}}", model,
 	)
-	body, err := json.Marshal(substituteJSON(t.bodyTmpl, bodyRepl))
+	body, err := json.Marshal(substituteJSON(t.bodyTmpl, bodyRepl, conv))
 	if err != nil {
 		return chatSpec{}, fmt.Errorf("build template body: %w", err)
 	}
@@ -236,6 +274,9 @@ func (t *templateProvider) BuildSpec(baseURL, apiKey, model string, messages []M
 }
 
 func (t *templateProvider) ParseReply(body []byte) (string, error) {
+	if t.cfg.SSE {
+		return t.parseSSE(body)
+	}
 	var v interface{}
 	if err := json.Unmarshal(body, &v); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
@@ -251,25 +292,79 @@ func (t *templateProvider) ParseReply(body []byte) (string, error) {
 	return s, nil
 }
 
+// parseSSE reassembles the reply from a Server-Sent Events body: it concatenates
+// the string at ReplyPath from every "data:" event (optionally restricted by the
+// SSEFilter). It skips blank lines, comments, the "[DONE]" sentinel, non-JSON
+// events, and events without the reply field, so control frames don't corrupt the
+// text. It returns an error (→ inconclusive, never a false SAFE) if no text event
+// was found — e.g. a stream that only carried tool calls or an error event.
+func (t *templateProvider) parseSSE(body []byte) (string, error) {
+	var sb strings.Builder
+	matched := 0
+	sc := bufio.NewScanner(bytes.NewReader(body))
+	// Allow long single-line data frames (up to the client's response cap).
+	sc.Buffer(make([]byte, 0, 64*1024), maxResponseBytes)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue // event:/id:/retry:/comment/blank lines carry no reply text
+		}
+		data := strings.TrimSpace(line[len("data:"):])
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var ev interface{}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			continue // a non-JSON data frame is not reply text
+		}
+		if t.cfg.SSEFilterKey != "" {
+			m, ok := ev.(map[string]interface{})
+			if !ok || fmt.Sprint(m[t.cfg.SSEFilterKey]) != t.cfg.SSEFilterValue {
+				continue
+			}
+		}
+		got, err := jsonPath(ev, t.cfg.ReplyPath)
+		if err != nil {
+			continue // this event has no reply field (control/keep-alive)
+		}
+		if s, ok := got.(string); ok {
+			sb.WriteString(s)
+			matched++
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("read sse stream: %w", err)
+	}
+	if matched == 0 {
+		return "", fmt.Errorf("sse stream carried no text at reply_path %q (only control/tool events?)", t.cfg.ReplyPath)
+	}
+	return sb.String(), nil
+}
+
 // substituteJSON deep-copies a parsed JSON template, replacing placeholder tokens
 // in every string leaf via repl (a single-pass Replacer). Re-marshaling the
 // returned value escapes all substituted text, so a payload containing
 // quotes/newlines/backslashes cannot corrupt or break out of the JSON body.
-func substituteJSON(v interface{}, repl *strings.Replacer) interface{} {
+func substituteJSON(v interface{}, repl *strings.Replacer, conv []interface{}) interface{} {
 	switch node := v.(type) {
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(node))
 		for k, val := range node {
-			out[k] = substituteJSON(val, repl)
+			out[k] = substituteJSON(val, repl, conv)
 		}
 		return out
 	case []interface{}:
 		out := make([]interface{}, len(node))
 		for i, val := range node {
-			out[i] = substituteJSON(val, repl)
+			out[i] = substituteJSON(val, repl, conv)
 		}
 		return out
 	case string:
+		// A whole-string "{{conversation}}" leaf becomes the messages ARRAY, not a
+		// string, so the agent receives the real multi-turn history.
+		if node == "{{conversation}}" {
+			return conv
+		}
 		return repl.Replace(node)
 	default:
 		return v

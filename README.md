@@ -104,6 +104,24 @@ text can never break out of the JSON or smuggle in another placeholder. The
 `api-key` never lives in the config file — it comes from `--api-key`/env and is
 substituted into `{{apiKey}}` at request time.
 
+**Streaming agents (SSE).** Many deployed agents reply as `text/event-stream`
+rather than one JSON body. Set `"sse": true` and quirn reassembles the reply by
+concatenating the `reply_path` field across `data:` events; add
+`"sse_filter_key"`/`"sse_filter_value"` to read only one event type. **Multi-turn**
+against a chat agent needs the real history, so use a whole-string
+`"{{conversation}}"` leaf — it becomes the messages array (not a flattened blob).
+A worked config for a Claude Agent-SDK app whose events are
+`{"type":"text","delta":"…"}`:
+
+```json
+"template": {
+  "url": "{{baseURL}}/api/assistant",
+  "body": { "messages": "{{conversation}}" },
+  "reply_path": "delta",
+  "sse": true, "sse_filter_key": "type", "sse_filter_value": "text"
+}
+```
+
 ### Agent mode (test the deployed app, not the bare model)
 
 By default quirn tests a *model*: it supplies its own system prompt to set up a

@@ -137,8 +137,16 @@ capabilities, each labelling **proxy** vs **confirmed**:
 - Shared mechanism: an optional `confirm` closure on `attack` (a deterministic
   signal that beats the judge). Honeytool is loopback-only. Unit-tested across
   all three (multi-turn ordering/inconclusive, canary/confirmer, honeytool
-  confirm-vs-proxy, CLI wiring). **Live validation pending** (needs a real
-  tool-using RAG agent — the operator-run acceptance script is in the design doc).
+  confirm-vs-proxy, CLI wiring).
+- **Live-validated 2026-08-21** against KeepWinning (`/api/assistant`, a Claude
+  Agent-SDK app), judge = Cerebras gpt-oss-120b. Needed two template-profile
+  additions (also shipped): **SSE response mode** (`sse`/`sse_filter_*`) and the
+  **`{{conversation}}`** placeholder for real multi-turn. Multi-turn, agent-mode
+  probes, and indirect injection (canary via the app's `memories`) all ran
+  end-to-end; quirn found a **real** LLM01 payload-splitting vuln (agent emitted
+  PWNED) while correctly clearing the robust cases; fail-closed on judge 429s
+  held. **Honeytool remains unvalidated live** — no app with a server-side
+  URL-taking tool was available; stays unit-tested. See `PHASE-3-DESIGN.md`.
 
 **Was in scope (to be detailed much later).**
 - **Indirect injection via RAG/tools** — "bring-your-own-context" flow: quirn emits a

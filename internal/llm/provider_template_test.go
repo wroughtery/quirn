@@ -24,6 +24,105 @@ func templateCfg() TemplateConfig {
 	}
 }
 
+// sseTemplate is a KeepWinning-shaped SSE agent: text arrives as
+// {"type":"text","delta":"…"} events, interleaved with control events.
+func sseTemplate() TemplateConfig {
+	return TemplateConfig{
+		URL:            "{{baseURL}}/api/assistant",
+		Body:           json.RawMessage(`{"messages":[{"role":"user","content":"{{payload}}"}]}`),
+		ReplyPath:      "delta",
+		SSE:            true,
+		SSEFilterKey:   "type",
+		SSEFilterValue: "text",
+	}
+}
+
+func TestTemplateSSEReassemblesText(t *testing.T) {
+	p, err := NewTemplateProvider(sseTemplate())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join([]string{
+		`data: {"type":"text","delta":"Hello"}`,
+		``,
+		`: keep-alive comment`,
+		`data: {"type":"text","delta":", world"}`,
+		`data: {"type":"step","assistant":[{"type":"text","text":"Hello, world"}],"calls":null}`,
+		`data: {"type":"done"}`,
+		`data: [DONE]`,
+	}, "\n")
+	got, err := p.ParseReply([]byte(body))
+	if err != nil {
+		t.Fatalf("ParseReply: %v", err)
+	}
+	if got != "Hello, world" {
+		t.Errorf("reassembled reply = %q, want %q", got, "Hello, world")
+	}
+}
+
+// A stream with only control/tool events (no text) is an error, not an empty
+// SAFE reply — so the probe records inconclusive rather than a false pass.
+func TestTemplateSSENoTextIsError(t *testing.T) {
+	p, err := NewTemplateProvider(sseTemplate())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join([]string{
+		`data: {"type":"step","assistant":[],"calls":[{"name":"delete_watchlist"}]}`,
+		`data: {"type":"error","code":"ai_failed"}`,
+		`data: {"type":"done"}`,
+	}, "\n")
+	if _, err := p.ParseReply([]byte(body)); err == nil {
+		t.Error("a text-less SSE stream must return an error (→ inconclusive), not empty text")
+	}
+}
+
+func TestTemplateSSEValidation(t *testing.T) {
+	// filter key without value
+	if _, err := NewTemplateProvider(TemplateConfig{URL: "u", Body: json.RawMessage(`{}`), ReplyPath: "d", SSE: true, SSEFilterKey: "type"}); err == nil {
+		t.Error("sse_filter_key without sse_filter_value should be rejected")
+	}
+	// filter without sse
+	if _, err := NewTemplateProvider(TemplateConfig{URL: "u", Body: json.RawMessage(`{}`), ReplyPath: "d", SSEFilterKey: "type", SSEFilterValue: "text"}); err == nil {
+		t.Error("sse_filter_* without sse:true should be rejected")
+	}
+}
+
+// {{conversation}} injects the real message history as a JSON array so a
+// multi-turn attack reaches a chat agent as a genuine conversation.
+func TestTemplateConversationPlaceholder(t *testing.T) {
+	cfg := TemplateConfig{
+		URL:       "{{baseURL}}/chat",
+		Body:      json.RawMessage(`{"messages":"{{conversation}}"}`),
+		ReplyPath: "reply",
+	}
+	p, err := NewTemplateProvider(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		io.WriteString(w, `{"reply":"ok"}`)
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, Provider: p, BackoffBase: time.Millisecond}
+	msgs := []Message{{Role: "user", Content: "one"}, {Role: "assistant", Content: "two"}, {Role: "user", Content: "three\"quote"}}
+	if _, err := c.Chat(context.Background(), "m", msgs); err != nil {
+		t.Fatal(err)
+	}
+	arr, ok := gotBody["messages"].([]interface{})
+	if !ok || len(arr) != 3 {
+		t.Fatalf("messages should be a 3-element array, got %T %v", gotBody["messages"], gotBody["messages"])
+	}
+	last := arr[2].(map[string]interface{})
+	if last["role"] != "user" || last["content"] != "three\"quote" {
+		t.Errorf("final turn not carried through with correct escaping: %v", last)
+	}
+}
+
 func TestTemplateProviderEndToEnd(t *testing.T) {
 	var gotPath, gotAuth, gotModelHdr string
 	var gotBody map[string]interface{}
