@@ -63,7 +63,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write        # create the GitHub Release
+      id-token: write        # keyless signing for build provenance
+      attestations: write    # store the provenance attestation
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -78,6 +80,22 @@ jobs:
           mkdir -p release
           find dist -type f -exec mv -t release {} +
           ls -la release
+
+      # sha256 sums so users can verify a downloaded binary. The glob is
+      # quirn_* so the checksums file never hashes itself.
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum quirn_* > checksums_sha256.txt
+          cat checksums_sha256.txt
+
+      # SLSA build provenance for every binary, keyless (Sigstore). Verify with:
+      #   gh attestation verify quirn_<os>_<arch> --repo wroughtery/quirn
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: release/quirn_*
 
       - name: Create GitHub Release
         env:
