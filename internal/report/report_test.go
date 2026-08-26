@@ -35,7 +35,9 @@ func TestWriteJSONEnvelope(t *testing.T) {
 	if env.Tool != "quirn" || env.Version != "9.9.9" || env.Target != "http://target" {
 		t.Errorf("envelope metadata wrong: %+v", env)
 	}
-	want := Summary{Probes: 4, Vulnerable: 1, Baselined: 1, Inconclusive: 1, OK: 1}
+	// One non-baselined critical finding forces posture F/39 (baselined vuln and
+	// inconclusive do not raise it above the critical cap).
+	want := Summary{Probes: 4, Vulnerable: 1, Baselined: 1, Inconclusive: 1, OK: 1, Score: 39, Grade: "F", GradeReason: "1 critical finding(s)"}
 	if env.Summary != want {
 		t.Errorf("summary = %+v, want %+v", env.Summary, want)
 	}
@@ -270,5 +272,37 @@ func TestMarkdownEscapesPipes(t *testing.T) {
 	WriteMarkdown(&buf, []probe.Result{r}, "")
 	if !strings.Contains(buf.String(), `a\|b`) {
 		t.Error("pipe in probe name should be escaped in the table")
+	}
+}
+
+// TestGradeRendersInReports pins that a probe's resistance Grade surfaces in the
+// text and markdown status column and the JSON finding, while an empty Grade
+// leaves output unchanged (omitempty). This is what makes an all-SAFE
+// indirect-injection run informative.
+func TestGradeRendersInReports(t *testing.T) {
+	graded := probe.Result{ProbeID: "indirect-injection", OWASP: "LLM01", Name: "indirect", Severity: "high", Grade: "FLAGGED", Evidence: "[retrieval-trigger] safe [FLAGGED]: named it"}
+	ungraded := probe.Result{ProbeID: "prompt-injection", OWASP: "LLM01", Name: "pi", Severity: "high"}
+
+	var txt bytes.Buffer
+	WriteText(&txt, []probe.Result{graded, ungraded})
+	if !strings.Contains(txt.String(), "ok [FLAGGED]") {
+		t.Errorf("text status should carry the tier:\n%s", txt.String())
+	}
+
+	var md bytes.Buffer
+	WriteMarkdown(&md, []probe.Result{graded}, "http://t")
+	if !strings.Contains(md.String(), "`FLAGGED`") {
+		t.Errorf("markdown status should carry the tier:\n%s", md.String())
+	}
+
+	var js bytes.Buffer
+	if err := WriteJSON(&js, []probe.Result{graded, ungraded}, "http://t", "1.0.0"); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	if !strings.Contains(js.String(), `"Grade": "FLAGGED"`) {
+		t.Errorf("graded finding should serialize its Grade:\n%s", js.String())
+	}
+	if strings.Contains(js.String(), `"Grade": ""`) {
+		t.Errorf("ungraded finding must omit Grade (omitempty):\n%s", js.String())
 	}
 }

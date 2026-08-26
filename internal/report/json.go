@@ -28,6 +28,11 @@ type Summary struct {
 	Baselined    int `json:"baselined"`  // vulnerable but suppressed by a baseline
 	Inconclusive int `json:"inconclusive"`
 	OK           int `json:"ok"`
+	// Overall posture score across all probes: 0-100 (higher is safer) and its
+	// A-F letter. Fail-closed — see Score.
+	Score       int    `json:"score"`
+	Grade       string `json:"grade"`
+	GradeReason string `json:"grade_reason"`
 }
 
 // WriteJSON renders results as a structured JSON envelope to w.
@@ -64,5 +69,9 @@ func summarize(results []probe.Result) Summary {
 			s.OK++
 		}
 	}
+	p := Score(results)
+	s.Score = p.Score
+	s.Grade = p.Letter
+	s.GradeReason = p.Reason
 	return s
 }

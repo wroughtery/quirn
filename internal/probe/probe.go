@@ -69,7 +69,13 @@ type Result struct {
 	// excluded from the severity gate and from SARIF output so PRs surface
 	// only *new* vulnerabilities. See internal/baseline.
 	Baselined bool
-	Evidence  string
+	// Grade is the probe's resistance rating, set only by probes that use the
+	// graded judge (currently indirect-injection). It holds the WEAKEST tier
+	// seen across the probe's attempts (judge.Grade* / judge.GradeConfirmed) —
+	// the security-relevant one — and is empty for ungraded probes. It records
+	// how the target resisted; it does not by itself change Vulnerable.
+	Grade    string `json:",omitempty"`
+	Evidence string
 }
 
 // StableID returns the deterministic identifier used to match a finding

@@ -48,6 +48,13 @@ type attack struct {
 	// Confirmers are attached programmatically at probe-run time (a func cannot
 	// come from config JSON), so custom probes always use the judge path.
 	confirm func(reply string, since time.Time) (confirmed bool, detail string)
+
+	// graded opts this attack into the resistance-ladder judge (ScoreGraded):
+	// instead of a binary SAFE/VULNERABLE the judge assigns a tier
+	// (OBEYED..FLAGGED), so even an all-SAFE run ranks how close each attempt
+	// came to breaking. Only the indirect-injection probe sets it; every other
+	// probe keeps the byte-identical binary judge path.
+	graded bool
 }
 
 // turnSeparator delimits the user turns of a multi-turn attack when they are
@@ -197,6 +204,9 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 			if confirmed, detail := atk.confirm(finalReply, attackStart); confirmed {
 				live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "vulnerable", Reason: "confirmed: " + detail})
 				base.Vulnerable = true
+				if atk.graded {
+					base.Grade = judge.WorseGrade(base.Grade, judge.GradeConfirmed)
+				}
 				evidence = append(evidence, fmt.Sprintf("[%s] CONFIRMED: %s", atk.name, detail))
 				continue
 			}
@@ -223,19 +233,32 @@ func runAttacks(ctx context.Context, client *llm.Client, cfg Config, base Result
 		if len(turns) > 1 {
 			judgePayload = strings.Join(turns, turnSeparator)
 		}
-		v := j.Score(ctx, goal, judgePayload, finalReply)
+		var v judge.Verdict
+		if atk.graded {
+			v = j.ScoreGraded(ctx, goal, judgePayload, finalReply)
+		} else {
+			v = j.Score(ctx, goal, judgePayload, finalReply)
+		}
+		// gradeTag annotates the graded probe's evidence and live reason with the
+		// resistance tier (e.g. " [FLAGGED]"), so an all-SAFE run still shows how
+		// each attempt ranked. Empty for the binary path.
+		gradeTag := ""
+		if v.Grade != "" {
+			gradeTag = " [" + v.Grade + "]"
+			base.Grade = judge.WorseGrade(base.Grade, v.Grade)
+		}
 		switch {
 		case v.Vulnerable:
-			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "vulnerable", Reason: v.Reason})
+			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "vulnerable", Reason: strings.TrimSpace(gradeTag + " " + v.Reason)})
 			base.Vulnerable = true
-			evidence = append(evidence, fmt.Sprintf("[%s] VULNERABLE: %s", atk.name, v.Reason))
+			evidence = append(evidence, fmt.Sprintf("[%s] VULNERABLE%s: %s", atk.name, gradeTag, v.Reason))
 		case v.Inconclusive:
 			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "inconclusive", Reason: v.Reason})
 			sawInconclusive = true
 			evidence = append(evidence, fmt.Sprintf("[%s] inconclusive: %s", atk.name, v.Reason))
 		default:
-			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "safe", Reason: v.Reason})
-			evidence = append(evidence, fmt.Sprintf("[%s] safe: %s", atk.name, v.Reason))
+			live.Emit(obs, live.Event{Kind: live.KindAttackVerdict, ProbeID: base.ProbeID, Attack: atk.name, Verdict: "safe", Reason: strings.TrimSpace(gradeTag + " " + v.Reason)})
+			evidence = append(evidence, fmt.Sprintf("[%s] safe%s: %s", atk.name, gradeTag, v.Reason))
 		}
 	}
 

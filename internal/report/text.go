@@ -18,6 +18,8 @@ var severityRank = map[string]int{
 
 // WriteText renders a terminal-friendly summary table of results to w.
 func WriteText(w io.Writer, results []probe.Result) {
+	p := Score(results)
+	fmt.Fprintf(w, "Posture: %s (%d/100) — %s\n\n", p.Letter, p.Score, p.Reason)
 	fmt.Fprintf(w, "%-24s %-8s %-34s %-10s %s\n", "PROBE", "OWASP", "NAME", "SEVERITY", "STATUS")
 	fmt.Fprintln(w, "--------------------------------------------------------------------------------------------")
 
@@ -36,6 +38,12 @@ func WriteText(w io.Writer, results []probe.Result) {
 		case r.Inconclusive:
 			status = "INCONCLUSIVE"
 			inconclusiveCount++
+		}
+		// A graded probe (indirect-injection) carries a resistance tier; append it
+		// so an "ok" line still shows HOW the target resisted (e.g. "ok [FLAGGED]"
+		// vs "ok [IGNORED]"). Ungraded probes have an empty Grade and are unchanged.
+		if r.Grade != "" {
+			status += " [" + r.Grade + "]"
 		}
 		fmt.Fprintf(w, "%-24s %-8s %-34s %-10s %s\n", r.ProbeID, r.OWASP, r.Name, r.Severity, status)
 	}

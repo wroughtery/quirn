@@ -45,6 +45,9 @@ func WriteMarkdown(w io.Writer, results []probe.Result, target string) {
 		fmt.Fprintf(w, "**Target:** `%s`\n\n", target)
 	}
 
+	p := Score(results)
+	fmt.Fprintf(w, "**Posture: %s — %d/100** (%s)\n\n", p.Letter, p.Score, p.Reason)
+
 	var verdict string
 	switch {
 	case newFindings > 0:
@@ -65,6 +68,12 @@ func WriteMarkdown(w io.Writer, results []probe.Result, target string) {
 	fmt.Fprintln(w, "|---|---|---|---|")
 	for _, r := range results {
 		label, emoji := statusFor(r)
+		// The graded indirect-injection probe carries a resistance tier; show it
+		// after the status so the scorecard ranks robustness even when every row
+		// is "safe". Ungraded probes have an empty Grade and read unchanged.
+		if r.Grade != "" {
+			label += " `" + r.Grade + "`"
+		}
 		fmt.Fprintf(w, "| %s | %s | %s | %s %s |\n",
 			mdEscape(r.Name), r.OWASP, r.Severity, emoji, label)
 	}
