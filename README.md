@@ -2,6 +2,8 @@
 
 **"gitleaks / trivy for LLM apps."** An open-source security linter for AI features: one line in CI runs an OWASP-LLM-Top-10 red-team against your chatbot or LLM endpoint and generates SARIF findings you can upload to the GitHub Security tab and annotate on the PR — zero config, zero Python, BYO-key. Grows from there into source-code and live-app security.
 
+![quirn demo — install, scan, and a fail-closed OWASP scorecard that gates CI](docs/demo.gif)
+
 ## The gap it fills
 
 Every existing tool is either a **Python/Node package** (garak, promptfoo, PyRIT, Giskard, DeepTeam — need an interpreter, an env, and config authoring) or a **runtime guardrail** (LLM Guard, Rebuff, LlamaFirewall — post-ship defense, not pre-ship testing). Nobody ships a **dependency-free single binary** that a non-security developer drops into CI and gets OWASP coverage with no setup. That developer currently runs nothing. That's the wedge.
@@ -252,6 +254,8 @@ Two optional observational flags help you watch a scan as it runs:
 `--live` streams each attack's payload, the target's reply, and the judge's verdict to stderr as the scan runs — a live console log. Off by default. Reads most cleanly with `--concurrency 1` (otherwise concurrent probes interleave in the log). Does not change the report on stdout.
 
 `--dashboard` serves a live web dashboard of the scan on loopback (default `127.0.0.1:8899`, override with `--dashboard-addr host:port`). It shows a card per probe and, per attack, the goal, the payload sent, the raw model reply, and the judge verdict + latency, updating live via Server-Sent Events. The server starts before the scan and STAYS UP after the scan completes until you press Ctrl+C (so it is interactive, not for CI). Bind only to loopback — it exposes captured payloads and model replies.
+
+![quirn live dashboard — probes flip to VULNERABLE in real time; expand any finding for the exact payload, model reply, and judge verdict](docs/dashboard.gif)
 
 Both flags are optional and observational: a run without them behaves exactly as before and produces byte-identical reports (no timestamps leak into reports).
 
