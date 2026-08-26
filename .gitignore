@@ -57,3 +57,5 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+_readme_preview.html
+quirn.exe
