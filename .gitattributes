@@ -1,0 +1,9 @@
+# Normalize to LF in the repo regardless of contributor OS. CRLF sneaking into
+# a workflow `run:` block or a .sh script breaks bash on Linux CI runners.
+* text=auto eol=lf
+
+# Binary assets: never touch line endings.
+*.gif binary
+*.png binary
+*.jpg binary
+*.ico binary

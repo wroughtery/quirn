@@ -2,7 +2,39 @@
 
 **"gitleaks / trivy for LLM apps."** An open-source security linter for AI features: one line in CI runs an OWASP-LLM-Top-10 red-team against your chatbot or LLM endpoint and generates SARIF findings you can upload to the GitHub Security tab and annotate on the PR — zero config, zero Python, BYO-key. Grows from there into source-code and live-app security.
 
+[![CI](https://github.com/wroughtery/quirn/actions/workflows/ci.yml/badge.svg)](https://github.com/wroughtery/quirn/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/wroughtery/quirn?color=35d0a5&label=release)](https://github.com/wroughtery/quirn/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![A Wroughtery product](https://img.shields.io/badge/a-Wroughtery%20product-35d0a5)](https://wroughtery.com)
+
 ![quirn demo — install, scan, and a fail-closed OWASP scorecard that gates CI](docs/demo.gif)
+
+## Install
+
+```sh
+# Go (any platform)
+go install github.com/wroughtery/quirn@latest
+
+# Linux / macOS (downloads the released binary and verifies its checksum)
+curl -fsSL https://raw.githubusercontent.com/wroughtery/quirn/main/scripts/install.sh | sh
+```
+
+Prebuilt binaries for Linux/macOS/Windows (amd64/arm64) are attached to every [release](https://github.com/wroughtery/quirn/releases). In CI, use the [GitHub Action](#github-action):
+
+```yaml
+- uses: wroughtery/quirn@v0
+  with:
+    target: https://your-endpoint
+```
+
+### Verify a release
+
+Every tagged release ships sha256 checksums and keyless SLSA build provenance:
+
+```sh
+sha256sum -c checksums_sha256.txt
+gh attestation verify quirn_<os>_<arch> --repo wroughtery/quirn
+```
 
 ## The gap it fills
 
