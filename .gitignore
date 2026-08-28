@@ -50,6 +50,8 @@ npm-debug.log*
 /gemma-scan.*
 /dash-*.json
 /dash-*.err
+/kw-*.out
+/kw-*.log
 
 # --- OS / editor ---
 .DS_Store

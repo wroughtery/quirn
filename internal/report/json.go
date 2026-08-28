@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 // Envelope is the top-level structure of the JSON report. It wraps the raw

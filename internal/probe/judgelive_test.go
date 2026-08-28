@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"quirn/internal/judge"
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/judge"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // TestJudgePayloadSplittingCanaryVariants is a manual, live validation of the

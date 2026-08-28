@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"quirn/internal/judge"
-	"quirn/internal/live"
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/judge"
+	"github.com/wroughtery/quirn/internal/live"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // attack is one attack attempt: a human-readable name, the goal handed to the

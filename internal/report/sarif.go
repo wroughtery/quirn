@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 const sarifSchema = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"

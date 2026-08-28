@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"quirn/internal/mockllm"
+	"github.com/wroughtery/quirn/internal/mockllm"
 )
 
 // writeConfigFile writes body to a temp quirn.json and returns its path.

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"quirn/internal/honeytool"
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/honeytool"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // agentCallbackServer simulates a tool-using agent. On a target (non-judge) call

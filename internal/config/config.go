@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"quirn/internal/report"
+	"github.com/wroughtery/quirn/internal/report"
 )
 
 // ErrNotExist is returned by Load when the config path does not exist, so the

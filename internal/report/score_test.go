@@ -3,7 +3,7 @@ package report
 import (
 	"testing"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 func res(sev string, vuln, inconc, baselined bool, grade string) probe.Result {

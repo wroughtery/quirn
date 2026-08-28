@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // Verdict is the judge's classification of a single attack attempt.

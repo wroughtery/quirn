@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 func writeTemp(t *testing.T, name, content string) string {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 // severityRank orders severities from lowest to highest for gating and

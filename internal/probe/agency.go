@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"quirn/internal/honeytool"
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/honeytool"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // agencyProbe implements OWASP LLM06: Excessive Agency. It presents the target

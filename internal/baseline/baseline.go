@@ -15,7 +15,7 @@ import (
 	"os"
 	"sort"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 // formatVersion is written into every baseline file so the format can evolve

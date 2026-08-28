@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 func TestParseVerdict(t *testing.T) {

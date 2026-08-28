@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"quirn/internal/baseline"
-	"quirn/internal/config"
-	"quirn/internal/honeytool"
-	"quirn/internal/live"
-	"quirn/internal/llm"
-	"quirn/internal/probe"
-	"quirn/internal/report"
-	"quirn/internal/runner"
+	"github.com/wroughtery/quirn/internal/baseline"
+	"github.com/wroughtery/quirn/internal/config"
+	"github.com/wroughtery/quirn/internal/honeytool"
+	"github.com/wroughtery/quirn/internal/live"
+	"github.com/wroughtery/quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/report"
+	"github.com/wroughtery/quirn/internal/runner"
 )
 
 const helpText = `quirn - LLM red-team CLI (OWASP LLM Top 10)

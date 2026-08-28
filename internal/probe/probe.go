@@ -5,9 +5,9 @@ package probe
 import (
 	"context"
 
-	"quirn/internal/honeytool"
-	"quirn/internal/live"
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/honeytool"
+	"github.com/wroughtery/quirn/internal/live"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // Config carries the run-time configuration a probe needs to execute against

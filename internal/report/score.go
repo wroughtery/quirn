@@ -3,7 +3,7 @@ package report
 import (
 	"fmt"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 // Posture is the overall security score for one target across all probes it was

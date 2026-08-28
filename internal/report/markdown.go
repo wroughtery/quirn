@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 // statusFor returns a human label and a leading emoji for a result's status,

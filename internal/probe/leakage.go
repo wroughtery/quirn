@@ -3,7 +3,7 @@ package probe
 import (
 	"context"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // leakageProbe implements OWASP LLM07: System Prompt Leakage. It plants a

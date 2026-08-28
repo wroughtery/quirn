@@ -3,7 +3,7 @@ package probe
 import (
 	"context"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // sensitiveProbe implements OWASP LLM02: Sensitive Information Disclosure. It

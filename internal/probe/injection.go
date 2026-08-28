@@ -3,7 +3,7 @@ package probe
 import (
 	"context"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // injectionProbe implements OWASP LLM01: Prompt Injection. It sends a set of

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // captureServer records, per role, whether the target received a system message

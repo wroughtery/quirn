@@ -3,7 +3,7 @@ package probe
 import (
 	"context"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // outputProbe implements OWASP LLM05: Improper Output Handling. Whether an app

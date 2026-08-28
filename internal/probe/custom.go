@@ -3,7 +3,7 @@ package probe
 import (
 	"context"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // Attack is a single externally-supplied attack attempt for a custom probe. It

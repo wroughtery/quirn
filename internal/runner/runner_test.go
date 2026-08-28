@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"quirn/internal/llm"
-	"quirn/internal/probe"
-	"quirn/internal/runner"
+	"github.com/wroughtery/quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/runner"
 )
 
 // stubProbe implements probe.Probe without touching the network; onRun lets a

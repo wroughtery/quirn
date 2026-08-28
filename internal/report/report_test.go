@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 func vuln(id, owasp, sev string) probe.Result {

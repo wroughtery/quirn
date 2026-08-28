@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"quirn/internal/mockllm"
+	"github.com/wroughtery/quirn/internal/mockllm"
 )
 
 func main() {

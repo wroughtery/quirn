@@ -32,7 +32,7 @@ Prebuilt binaries for Linux/macOS/Windows (amd64/arm64) are attached to every [r
 Every tagged release ships sha256 checksums and keyless SLSA build provenance:
 
 ```sh
-sha256sum -c checksums_sha256.txt
+sha256sum --ignore-missing -c checksums_sha256.txt
 gh attestation verify quirn_<os>_<arch> --repo wroughtery/quirn
 ```
 

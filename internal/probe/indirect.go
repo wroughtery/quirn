@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/llm"
 )
 
 // indirectProbe implements the Phase-3, real-world form of OWASP LLM01 (with

@@ -49,25 +49,20 @@ say "${BOLD}quirn $version${RST}  ($os/$arch)"
 curl -fSL --progress-bar "$base/$asset" -o "$tmp/quirn" \
   || die "download failed: $base/$asset"
 
-# --- verify checksum (best effort: the release ships checksums_sha256.txt) ---
-if curl -fsSL "$base/checksums_sha256.txt" -o "$tmp/sums" 2>/dev/null; then
-  want=$(grep " ${asset}\$" "$tmp/sums" | awk '{print $1}' | head -1)
-  if [ -n "$want" ]; then
-    if command -v sha256sum >/dev/null 2>&1; then
-      got=$(sha256sum "$tmp/quirn" | awk '{print $1}')
-    elif command -v shasum >/dev/null 2>&1; then
-      got=$(shasum -a 256 "$tmp/quirn" | awk '{print $1}')
-    else
-      got=""; say "${DIM}no sha256 tool found — skipping checksum verification${RST}"
-    fi
-    if [ -n "$got" ]; then
-      [ "$got" = "$want" ] || die "checksum mismatch — refusing to install (expected $want, got $got)."
-      say "${DIM}checksum verified${RST}"
-    fi
-  fi
+# --- verify checksum (fail closed: every release ships checksums_sha256.txt) ---
+curl -fsSL "$base/checksums_sha256.txt" -o "$tmp/sums" \
+  || die "could not download checksums_sha256.txt — refusing to install unverified."
+want=$(grep " ${asset}\$" "$tmp/sums" | awk '{print $1}' | head -1)
+[ -n "$want" ] || die "no checksum for $asset in checksums_sha256.txt — refusing to install."
+if command -v sha256sum >/dev/null 2>&1; then
+  got=$(sha256sum "$tmp/quirn" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+  got=$(shasum -a 256 "$tmp/quirn" | awk '{print $1}')
 else
-  say "${DIM}no checksums file on this release — skipping verification${RST}"
+  die "no sha256sum or shasum found — refusing to install unverified."
 fi
+[ "$got" = "$want" ] || die "checksum mismatch — refusing to install (expected $want, got $got)."
+say "${DIM}checksum verified${RST}"
 chmod +x "$tmp/quirn"
 
 # --- choose an install dir we can actually write to ---

@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      # semver only: the floating v0 major tag must not cut a second release
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 permissions:
   contents: read
@@ -100,6 +101,7 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # no checkout in this job — gh needs the repo explicitly
         run: |
           set -euo pipefail
           gh release create "${GITHUB_REF_NAME}" release/* \

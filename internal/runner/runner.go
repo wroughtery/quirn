@@ -6,8 +6,8 @@ import (
 	"context"
 	"sync"
 
-	"quirn/internal/llm"
-	"quirn/internal/probe"
+	"github.com/wroughtery/quirn/internal/llm"
+	"github.com/wroughtery/quirn/internal/probe"
 )
 
 // DefaultConcurrency is used when Run is called with concurrency <= 0.
