@@ -293,10 +293,10 @@ Both flags are optional and observational: a run without them behaves exactly as
 
 ### GitHub Action
 
-No tagged release exists yet, so the action ([`action.yml`](action.yml)) builds the binary from source on every run. Add it to a workflow:
+The action ([`action.yml`](action.yml)) downloads the prebuilt binary for the release it is pinned to (`@v0` tracks the latest v0.x) and falls back to building from source on unrecognized runners. Add it to a workflow:
 
 ```yaml
-- uses: wroughtery/quirn@main
+- uses: wroughtery/quirn@v0
   with:
     target: ${{ secrets.QUIRN_TARGET_URL }}
     api-key: ${{ secrets.QUIRN_API_KEY }}
@@ -342,7 +342,7 @@ The mock handler (`internal/mockllm`) is the same one the CLI test suite runs ag
 
 | Layer | Tech |
 |---|---|
-| Red-team core (v0) | **Go** — single static binary; `cobra` CLI, stdlib `net/http`, goroutines for concurrent probes; SARIF output. No runtime dependency |
+| Red-team core (v0) | **Go** — single static binary; stdlib `flag` CLI and `net/http`, goroutines for concurrent probes; SARIF output. No runtime dependency |
 | Dashboard (v1+) | Next.js + TypeScript + Tailwind + shadcn/ui |
 | Security engine (later DAST head) | Go (`chi`, `river`) + Docker sandbox |
 | Data (v1+) | Postgres; artifacts on S3-compatible storage (R2) |
@@ -357,4 +357,4 @@ Test only LLM endpoints and targets you **own or are authorized to test**. For t
 
 Building v0. Locked: **name Quirn, LLM red-team wedge, Go single-binary core, open-core, BYO-key, Wroughtery sub-brand.** Repo lives at `wroughtery/quirn`.
 
-Working today: `scan` against any OpenAI-compatible endpoint (plus anthropic/gemini/azure/template profiles); six OWASP probe classes (LLM01/02/05/06/07/09) with an LLM judge; a separate judge endpoint/key; **agent mode** (test the deployed app, not the bare model); **multi-turn attacks**; **indirect prompt injection** via a seeded canary (`quirn canary` + `--indirect-nonce`); **honeytool-confirmed excessive agency** (`--agent-honeytool`); probe selection (`--only`/`--skip`/`--list-probes`); `text`/`json`/`sarif`/`markdown` reports; baseline ratchet (`--baseline` / `--write-baseline`); `--fail-on` severity gate (fail-closed on an unreachable target); concurrent probe execution; live console/dashboard; and a GitHub Action. Test suite covers the CLI, judge, probes, selection, reports, baseline, client, and honeytool. Not yet: remaining OWASP classes, session/cookie passthrough for agent targets, YAML policy config, `curl | sh` release artifacts, and the v1 hosted dashboard.
+Working today: `scan` against any OpenAI-compatible endpoint (plus anthropic/gemini/azure/template profiles); six OWASP probe classes (LLM01/02/05/06/07/09) with an LLM judge; a separate judge endpoint/key; **agent mode** (test the deployed app, not the bare model); **multi-turn attacks**; **indirect prompt injection** via a seeded canary (`quirn canary` + `--indirect-nonce`); **honeytool-confirmed excessive agency** (`--agent-honeytool`); probe selection (`--only`/`--skip`/`--list-probes`); `text`/`json`/`sarif`/`markdown` reports; baseline ratchet (`--baseline` / `--write-baseline`); `--fail-on` severity gate (fail-closed on an unreachable target); concurrent probe execution; live console/dashboard; and a GitHub Action. Test suite covers the CLI, judge, probes, selection, reports, baseline, client, and honeytool. Not yet: remaining OWASP classes, session/cookie passthrough for agent targets, YAML policy config, and the v1 hosted dashboard.
